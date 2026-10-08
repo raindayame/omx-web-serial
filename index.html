@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OMX Web Serial — 氣體感測量測</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">OMX <span>Web Serial</span></div>
+  <div class="conn-status" id="connStatus"><span class="dot"></span><span id="connText">未連線</span></div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <section class="card">
+      <h2>連線</h2>
+      <div class="row">
+        <label>鮑率</label>
+        <select id="baudSel">
+          <option value="9600">9600</option>
+          <option value="115200" selected>115200</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>平均秒數</label>
+        <input type="number" id="intervalInput" value="1" min="1" max="3600">
+      </div>
+      <div class="btn-row">
+        <button id="btnConnect" class="primary">連接 COM</button>
+        <button id="btnDisconnect" disabled>斷開</button>
+      </div>
+      <div class="hint">僅 Chrome / Edge 支援 Web Serial。頁面需經 HTTPS 開啟。</div>
+    </section>
+
+    <section class="card">
+      <h2>ADC 校正</h2>
+      <div class="adc-grid">
+        <label>ADC1 <input type="number" step="0.001" id="adc1" value="3.28"></label>
+        <label>ADC2 <input type="number" step="0.001" id="adc2" value="3.27"></label>
+        <label>ADC3 <input type="number" step="0.001" id="adc3" value="3.27"></label>
+        <label>ADC4 <input type="number" step="0.001" id="adc4" value="3.28"></label>
+      </div>
+      <div class="btn-row">
+        <button id="btnCalSend">送出校正</button>
+        <span id="calState" class="muted"></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>量測控制</h2>
+      <div class="btn-row">
+        <button id="btnMode" class="toggle">電阻模式</button>
+        <button id="btnR0">設置 Rair</button>
+      </div>
+      <div class="btn-row">
+        <button id="btnRecStart">開始記錄</button>
+        <button id="btnRecStop" disabled>停止並下載</button>
+      </div>
+      <div class="btn-row">
+        <button id="btnTimerStart">計時開始</button>
+        <button id="btnTimerStop">停止</button>
+        <button id="btnTimerReset">歸零</button>
+      </div>
+      <div class="timer-display" id="timerDisplay">00:00:00</div>
+    </section>
+
+    <section class="card">
+      <h2>通道判定規則</h2>
+      <div class="row">
+        <label><input type="checkbox" id="ruleResEn"> 電阻啟用</label>
+      </div>
+      <div class="row">
+        <input type="number" id="ruleResMin" value="0" step="any" placeholder="下限">
+        <span>~</span>
+        <input type="number" id="ruleResMax" value="1000" step="any" placeholder="上限">
+      </div>
+      <div class="row">
+        <label><input type="checkbox" id="ruleSensEn"> 靈敏度啟用</label>
+      </div>
+      <div class="row">
+        <input type="number" id="ruleSensMin" value="0" step="any" placeholder="下限">
+        <span>~</span>
+        <input type="number" id="ruleSensMax" value="5" step="any" placeholder="上限">
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>模組環境</h2>
+      <div class="env-grid">
+        <div><span class="muted">溫度</span><strong id="modTemp">--</strong> ℃</div>
+        <div><span class="muted">濕度</span><strong id="modHumd">--</strong> %</div>
+      </div>
+      <canvas id="envChart" height="90"></canvas>
+    </section>
+  </aside>
+
+  <main class="main">
+    <section class="card chart-card">
+      <div class="chart-head">
+        <h2 id="chartTitle">即時監控圖 — 電阻 (kΩ)</h2>
+        <div class="legend" id="chartLegend"></div>
+      </div>
+      <canvas id="mainChart"></canvas>
+      <div class="chart-foot muted" id="chartInfo">等待資料…</div>
+    </section>
+
+    <section class="card">
+      <div class="ch-head">
+        <h2>通道 <span id="chPageLabel"></span></h2>
+        <div class="btn-row">
+          <button id="btnChPrev">◀ 1–16</button>
+          <button id="btnChNext">17–32 ▶</button>
+        </div>
+      </div>
+      <div class="ch-grid" id="chGrid"></div>
+    </section>
+
+    <section class="card">
+      <h2>日誌</h2>
+      <div class="log" id="logBox"></div>
+    </section>
+  </main>
+</div>
+
+<script src="chart.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
