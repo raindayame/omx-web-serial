@@ -1,0 +1,104 @@
+:root {
+  --bg: #0f172a;
+  --panel: #1e293b;
+  --panel2: #273449;
+  --line: #334155;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --accent: #38bdf8;
+  --green: #4ade80;
+  --red: #f87171;
+  --amber: #fbbf24;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font-family: "Segoe UI", "Microsoft JhengHei", system-ui, sans-serif;
+  font-size: 14px;
+}
+.topbar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 18px; background: #0b1220; border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 10;
+}
+.brand { font-size: 20px; font-weight: 700; letter-spacing: 1px; }
+.brand span { color: var(--accent); font-weight: 400; font-size: 14px; }
+.conn-status { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.conn-status .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); }
+.conn-status.on .dot { background: var(--green); box-shadow: 0 0 8px var(--green); }
+
+.layout { display: flex; gap: 14px; padding: 14px; max-width: 1600px; margin: 0 auto; }
+.sidebar { width: 300px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px; }
+.main { flex: 1; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+.card {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 14px;
+}
+.card h2 { margin: 0 0 10px; font-size: 15px; color: var(--accent); }
+
+.row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.row label { color: var(--muted); white-space: nowrap; }
+.btn-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+
+button {
+  background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 7px 14px; cursor: pointer; font-size: 13px;
+}
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button.primary { background: #0369a1; border-color: #0284c7; }
+button.toggle.on { background: #065f46; border-color: #10b981; }
+
+input[type="number"], select {
+  background: #0b1220; color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 8px; font-size: 13px; width: 100%;
+}
+input[type="checkbox"] { accent-color: var(--accent); }
+.hint { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.muted { color: var(--muted); font-size: 12px; }
+
+.adc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.adc-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+
+.timer-display {
+  font-size: 28px; font-variant-numeric: tabular-nums; text-align: center;
+  background: #0b1220; border-radius: 8px; padding: 8px; letter-spacing: 2px;
+}
+.env-grid { display: flex; gap: 16px; margin-bottom: 8px; }
+.env-grid strong { font-size: 22px; margin: 0 4px; font-variant-numeric: tabular-nums; }
+#envChart { width: 100%; }
+
+.chart-card { padding-bottom: 8px; }
+.chart-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.legend { display: flex; gap: 10px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+#mainChart { width: 100%; height: 420px; display: block; }
+.chart-foot { padding: 6px 2px 2px; }
+
+.ch-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.ch-head h2 { margin: 0; }
+.ch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 8px; }
+.ch-card {
+  background: #0b1220; border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 10px; position: relative;
+}
+.ch-card .ch-name { font-size: 12px; color: var(--muted); }
+.ch-card .ch-val { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ch-card .ch-unit { font-size: 11px; color: var(--muted); }
+.ch-card .ch-badge {
+  position: absolute; top: 6px; right: 8px; font-size: 10px; padding: 1px 6px;
+  border-radius: 10px; background: var(--line); color: var(--text);
+}
+.ch-card.pass .ch-badge { background: #065f46; color: #a7f3d0; }
+.ch-card.fail .ch-badge { background: #7f1d1d; color: #fecaca; }
+
+.log {
+  height: 150px; overflow-y: auto; background: #0b1220; border-radius: 8px;
+  padding: 8px 10px; font-family: Consolas, monospace; font-size: 12px; line-height: 1.6;
+}
+.log .t { color: var(--muted); margin-right: 8px; }
+
+@media (max-width: 1000px) {
+  .layout { flex-direction: column; }
+  .sidebar { width: 100%; }
+}
