@@ -9,6 +9,10 @@
 - `styles.css` — 深色儀表板風格
 - `app.js` — Web Serial 連線、ESP32 協定解析、量測邏輯
 - `chart.js` — Canvas 即時圖表（10 分鐘滑動視窗）
+- `tools/` — 獨立資料分析工具（各為自包含單一頁面，功能互不混雜）
+  - `tools/log-response-ln/` — log_response_ln 電壓－濃度統計分析
+  - `tools/gas-wave-analyzer/` — Gas Wave Analyzer（R0 / Rgas / Multi-Voltage）
+  - `tools/ethanol-prediction/` — 乙醇感測多電壓濃度預測
 
 ## 功能
 
