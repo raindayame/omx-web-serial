@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>log_response_ln 電壓－濃度統計分析</title>
+<style>
+:root{--bg:#f5f7fb;--card:#fff;--line:#d9e0ea;--text:#172033;--muted:#64748b;--accent:#2457d6;--ok:#087f5b}
+*{box-sizing:border-box} body{margin:0;font-family:"Segoe UI","Noto Sans TC",sans-serif;background:var(--bg);color:var(--text)}
+.wrap{max-width:1450px;margin:auto;padding:28px}.head{display:flex;justify-content:space-between;gap:18px;align-items:end;margin-bottom:18px}
+h1{font-size:25px;margin:0 0 6px}.sub{color:var(--muted);font-size:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 2px 10px #1720330a}
+.drop{border:2px dashed #b7c3d6;border-radius:12px;padding:28px;text-align:center;cursor:pointer;transition:.15s}
+.drop.drag{border-color:var(--accent);background:#f0f5ff}.drop b{display:block;font-size:17px;margin-bottom:6px}
+button{border:1px solid #cbd5e1;background:white;border-radius:8px;padding:9px 13px;cursor:pointer;font-weight:600;color:#24324a}
+button.primary{background:var(--accent);border-color:var(--accent);color:white}button:disabled{opacity:.45;cursor:not-allowed}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}.status{margin-left:auto;color:var(--muted);align-self:center;font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px}
+.kpi{border:1px solid var(--line);border-radius:10px;padding:12px}.kpi span{display:block;color:var(--muted);font-size:12px}.kpi strong{display:block;margin-top:5px;font-size:18px}
+h2{font-size:17px;margin:0 0 12px}.tablewrap{overflow:auto;max-height:520px;border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}th,td{padding:9px 11px;border-bottom:1px solid #e8edf4;text-align:right}
+th{position:sticky;top:0;background:#f7f9fc;z-index:1;color:#42526b}th:first-child,td:first-child{text-align:left}
+tr:last-child td{border-bottom:0}
+tr.voltage-tint td{background:#f2f6fb}
+tr.voltage-white td{background:#ffffff}
+tr.voltage-tint:hover td,tr.voltage-white:hover td{background:#e9f0f8}
+.eq{font-family:Consolas,monospace;color:#183d8f}.good{color:var(--ok);font-weight:700}
+.note{font-size:12px;color:var(--muted);line-height:1.7;margin-top:10px}
+.filelist{font-size:12px;color:var(--muted);margin-top:10px;max-height:90px;overflow:auto}
+.channelBox{
+  position:fixed;left:14px;top:50%;transform:translateY(-50%);
+  width:185px;max-height:72vh;overflow:auto;z-index:50;
+  background:#fff;border:1px solid var(--line);border-radius:12px;
+  padding:12px;box-shadow:0 8px 28px #1720331f
+}
+.channelHead{display:block;margin-bottom:10px}
+.channelHead b{display:block;font-size:14px;margin-bottom:8px}
+.channelActions{display:flex;gap:5px}.channelActions button{padding:6px 8px;font-size:11px;flex:1}
+.channelGrid{display:grid;grid-template-columns:1fr;gap:6px}
+.chip{display:flex;align-items:center;gap:7px;border:1px solid #ccd6e3;background:#fff;border-radius:8px;padding:7px 9px;cursor:pointer;user-select:none}
+.chip:has(input:checked){background:#eef4ff;border-color:#8aa9ef;color:#173f9f}
+.chip input{margin:0}
+.channelBox .note{font-size:11px;line-height:1.45}
+@media(max-width:1180px){
+  .channelBox{position:sticky;left:auto;top:8px;transform:none;width:auto;max-height:none;overflow:visible;margin:12px 0;z-index:20}
+  .channelHead{display:flex;align-items:center;justify-content:space-between}
+  .channelHead b{margin:0}.channelGrid{display:flex;flex-wrap:wrap}
+  .chip{display:inline-flex}
+}
+@media(max-width:800px){.grid{grid-template-columns:1fr 1fr}.head{display:block}.status{width:100%;margin:0}}
+</style>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <div><h1>log_response_ln 電壓－濃度統計分析</h1>
+      <div class="sub">依 voltage_V × concentration 彙整 Q1、Q3、Mean，並計算 0.2–2、2–20、20–200 ppm 區域線性迴歸。</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <input id="files" type="file" accept=".csv,text/csv" multiple hidden>
+    <div id="drop" class="drop"><b>匯入 CSV</b><span>點擊選檔，或將一個／多個 wave_features CSV 拖曳至此</span></div>
+    <div class="toolbar">
+      <button class="primary" id="pick">選擇 CSV</button>
+      <button id="clear">清除</button>
+      <button id="exportXlsx" disabled>匯出 Excel (.xlsx)</button>
+      <span id="status" class="status">尚未載入資料</span>
+    </div>
+    <div id="filelist" class="filelist"></div>
+    <div id="channelBox" class="channelBox" style="display:none">
+      <div class="channelHead">
+        <b>計算通道</b>
+        <div class="channelActions">
+          <button type="button" id="allChannels">全選</button>
+          <button type="button" id="noChannels">全不選</button>
+        </div>
+      </div>
+      <div id="channelGrid" class="channelGrid"></div>
+      <div class="note">勾選／取消後立即重新計算下方結果。</div>
+    </div>
+    <div class="note">Excel 匯出：第 1 頁「原檔」保留匯入資料；第 2 頁「統計與迴歸」依序放置 Q1 / Q3 / Mean 與區域濃度線性迴歸。</div>
+  </div>
+
+  <div class="card">
+    <div class="grid">
+      <div class="kpi"><span>CSV 檔案</span><strong id="kFiles">0</strong></div>
+      <div class="kpi"><span>有效 log_response_ln</span><strong id="kRows">0</strong></div>
+      <div class="kpi"><span>電壓數</span><strong id="kVolts">0</strong></div>
+      <div class="kpi"><span>濃度組數</span><strong id="kGroups">0</strong></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>① 相同電壓 × 相同濃度：Q1 / Q3 / Mean</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Voltage (V)</th><th>Concentration (ppm)</th><th>N</th><th>Q1</th><th>Q3</th><th>Mean</th><th>Q3−Q1</th><th>Relative IQR (%)</th></tr></thead>
+      <tbody id="statsBody"><tr><td colspan="8" style="text-align:center;color:#64748b">請先匯入 CSV</td></tr></tbody>
+    </table></div>
+    <div class="note">Q1、Q3 採線性插值百分位數（等同常見 INC 型百分位數）。Relative IQR (%) = (Q3−Q1) / |Mean| × 100%。NaN、空白及非有限的 log_response_ln 自動排除。</div>
+  </div>
+
+  <div class="card">
+    <h2>② 區域濃度線性迴歸（相同 Voltage 的 Channels 合併；X = concentration；Y = Mean log_response_ln）</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Voltage (V)</th><th>Channel</th><th>Range (ppm)</th><th>Points</th><th>Slope</th><th>Intercept</th><th>R²</th><th>Equation</th><th>Max Relative IQR (%)</th></tr></thead>
+      <tbody id="regBody"><tr><td colspan="9" style="text-align:center;color:#64748b">請先匯入 CSV</td></tr></tbody>
+    </table></div>
+    <div class="note">三個區間均包含端點，因此 2 ppm 同時納入 0.2–2 與 2–20；20 ppm 同時納入 2–20 與 20–200。Equation 格式：y = slope x ± intercept，對應 Excel：<span class="eq">="y = "&TEXT(O7,"0.0000")&"x "&IF(P7>=0,"+ ","- ")&TEXT(ABS(P7),"0.0000")</span></div>
+  </div>
+</div>
+<script>
+const $=s=>document.querySelector(s);
+let loadedFiles=[], allValidRows=[], validRows=[], stats=[], regressions=[], rawImports=[], selectedChannels=new Set();
+
+function parseCSV(text){
+  text=text.replace(/^\uFEFF/,'');
+  const rows=[]; let row=[], cell='', q=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(q){
+      if(c==='"' && text[i+1]==='"'){cell+='"';i++}
+      else if(c==='"')q=false; else cell+=c;
+    }else{
+      if(c==='"')q=true;
+      else if(c===','){row.push(cell);cell=''}
+      else if(c==='\n'){row.push(cell);rows.push(row);row=[];cell=''}
+      else if(c!=='\r')cell+=c;
+    }
+  }
+  if(cell.length||row.length){row.push(cell);rows.push(row)}
+  if(!rows.length)return [];
+  const head=rows[0].map(x=>x.trim());
+  return rows.slice(1).filter(r=>r.some(x=>String(x).trim()!=='')).map(r=>{
+    const o={};head.forEach((h,i)=>o[h]=r[i]??'');return o;
+  });
+}
+function quantile(a,p){
+  const s=a.slice().sort((x,y)=>x-y); if(!s.length)return NaN;
+  const pos=(s.length-1)*p, lo=Math.floor(pos), hi=Math.ceil(pos);
+  return lo===hi?s[lo]:s[lo]+(s[hi]-s[lo])*(pos-lo);
+}
+function fmt(x,d=4){return Number.isFinite(x)?x.toFixed(d):''}
+function equation(m,b){return `y = ${fmt(m)}x ${b>=0?'+':'-'} ${fmt(Math.abs(b))}`}
+function linreg(points){
+  const n=points.length;if(n<2)return {m:NaN,b:NaN,r2:NaN};
+  const xm=points.reduce((s,p)=>s+p.x,0)/n, ym=points.reduce((s,p)=>s+p.y,0)/n;
+  const sxx=points.reduce((s,p)=>s+(p.x-xm)**2,0);
+  if(sxx===0)return {m:NaN,b:NaN,r2:NaN};
+  const m=points.reduce((s,p)=>s+(p.x-xm)*(p.y-ym),0)/sxx, b=ym-m*xm;
+  const ssTot=points.reduce((s,p)=>s+(p.y-ym)**2,0), ssRes=points.reduce((s,p)=>s+(p.y-(m*p.x+b))**2,0);
+  const r2=ssTot===0?(ssRes===0?1:NaN):1-ssRes/ssTot;
+  return {m,b,r2};
+}
+function refreshChannelSelector(){
+  const channels=[...new Set(allValidRows.map(r=>r.ch).filter(Boolean))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+  const box=$('#channelBox'), grid=$('#channelGrid');
+  if(!channels.length){box.style.display='none';grid.innerHTML='';selectedChannels=new Set();validRows=allValidRows.slice();return}
+  // New import defaults to all channels selected.
+  if(selectedChannels.size===0) channels.forEach(ch=>selectedChannels.add(ch));
+  // Remove stale channel selections.
+  [...selectedChannels].forEach(ch=>{if(!channels.includes(ch))selectedChannels.delete(ch)});
+  box.style.display='';
+  grid.innerHTML=channels.map(ch=>`<label class="chip"><input type="checkbox" value="${escapeHTML(ch)}" ${selectedChannels.has(ch)?'checked':''}>${escapeHTML(ch)}</label>`).join('');
+  grid.querySelectorAll('input').forEach(cb=>cb.addEventListener('change',()=>{
+    if(cb.checked)selectedChannels.add(cb.value);else selectedChannels.delete(cb.value);
+    applyChannelFilter();
+  }));
+}
+function applyChannelFilter(){
+  const hasNamed=allValidRows.some(r=>r.ch);
+  validRows=hasNamed?allValidRows.filter(r=>selectedChannels.has(r.ch)):allValidRows.slice();
+  analyze();
+}
+function analyze(){
+  const groups=new Map();
+  validRows.forEach(r=>{
+    const k=`${r.v}|${r.c}`; if(!groups.has(k))groups.set(k,[]);
+    groups.get(k).push(r.y);
+  });
+  stats=[...groups.entries()].map(([k,a])=>{
+    const [v,c]=k.split('|').map(Number);
+    const q1=quantile(a,.25),q3=quantile(a,.75),mean=a.reduce((s,x)=>s+x,0)/a.length;
+    return {v,c,n:a.length,q1,q3,mean,iqr:q3-q1,relativeIQR:mean!==0?((q3-q1)/Math.abs(mean))*100:NaN};
+  }).sort((a,b)=>a.v-b.v||a.c-b.c);
+
+  const ranges=[{label:'0.2–2',min:.2,max:2},{label:'2–20',min:2,max:20},{label:'20–200',min:20,max:200}];
+  // Regional regression is calculated per Voltage.
+  // All channels assigned to the same voltage are pooled together, e.g. G, H.
+  const volts=[...new Set(validRows.map(r=>r.v))].sort((a,b)=>a-b);
+  regressions=[];
+  volts.forEach(v=>{
+    const rows=validRows.filter(r=>r.v===v);
+    const channels=[...new Set(rows.map(r=>r.ch).filter(Boolean))].sort();
+    const chLabel=channels.join(', ');
+    ranges.forEach(rg=>{
+      const cr=rows.filter(r=>r.c>=rg.min&&r.c<=rg.max);
+      const byC=new Map();
+      cr.forEach(r=>{if(!byC.has(r.c))byC.set(r.c,[]);byC.get(r.c).push(r.y)});
+      const z=[...byC.entries()].sort((a,b)=>a[0]-b[0]).map(([c,a])=>{
+        const q1=quantile(a,.25),q3=quantile(a,.75),mean=a.reduce((s,x)=>s+x,0)/a.length;
+        return {c,mean,iqr:q3-q1,relativeIQR:mean!==0?((q3-q1)/Math.abs(mean))*100:NaN};
+      });
+      const lr=linreg(z.map(x=>({x:x.c,y:x.mean})));
+      regressions.push({v,ch:chLabel,range:rg.label,n:z.length,slope:lr.m,intercept:lr.b,r2:lr.r2,
+        eq:Number.isFinite(lr.m)?equation(lr.m,lr.b):'',maxRelativeIQR:z.length?Math.max(...z.map(x=>x.relativeIQR).filter(Number.isFinite)):NaN});
+    });
+  });
+  render();
+}
+function render(){
+  $('#kFiles').textContent=loadedFiles.length;$('#kRows').textContent=validRows.length;
+  $('#kVolts').textContent=new Set(validRows.map(x=>x.v)).size;$('#kGroups').textContent=stats.length;
+  const statVolts=[...new Set(stats.map(x=>x.v))];
+  $('#statsBody').innerHTML=stats.length?stats.map(x=>{
+    const cls=statVolts.indexOf(x.v)%2===0?'voltage-tint':'voltage-white';
+    return `<tr class="${cls}"><td>${x.v}</td><td>${x.c}</td><td>${x.n}</td><td>${fmt(x.q1,6)}</td><td>${fmt(x.q3,6)}</td><td>${fmt(x.mean,6)}</td><td>${fmt(x.iqr,6)}</td><td>${fmt(x.relativeIQR,2)}%</td></tr>`;
+  }).join(''):
+    '<tr><td colspan="8" style="text-align:center">無有效資料</td></tr>';
+  const regVolts=[...new Set(regressions.map(x=>x.v))];
+  $('#regBody').innerHTML=regressions.length?regressions.map(x=>{
+    const cls=regVolts.indexOf(x.v)%2===0?'voltage-tint':'voltage-white';
+    return `<tr class="${cls}"><td>${x.v}</td><td>${escapeHTML(x.ch||'')}</td><td>${x.range}</td><td>${x.n}</td><td>${fmt(x.slope)}</td><td>${fmt(x.intercept)}</td><td class="${x.r2>=.9?'good':''}">${fmt(x.r2)}</td><td class="eq">${x.eq}</td><td>${fmt(x.maxRelativeIQR,2)}%</td></tr>`;
+  }).join(''):
+    '<tr><td colspan="9" style="text-align:center">無有效資料</td></tr>';
+  const ok=stats.length>0;$('#exportXlsx').disabled=!ok;
+  $('#status').textContent=ok?`完成：${validRows.length} 筆有效資料，${stats.length} 個電壓－濃度群組`:'尚未載入有效資料';
+}
+async function load(files){
+  loadedFiles=[];allValidRows=[];validRows=[];rawImports=[];selectedChannels=new Set();
+  const errors=[];
+  for(const f of files){
+    try{
+      const rows=parseCSV(await f.text());
+      if(!rows.length)throw Error('空白 CSV');
+      const keys=Object.keys(rows[0]);
+      rawImports.push({name:f.name,headers:keys.slice(),rows:rows.map(r=>({...r}))});
+      for(const req of ['voltage_V','concentration','log_response_ln'])if(!keys.includes(req))throw Error(`缺少欄位 ${req}`);
+      let n=0;
+      rows.forEach(r=>{
+        const v=Number(r.voltage_V),c=Number(r.concentration),y=Number(r.log_response_ln);
+        if(Number.isFinite(v)&&Number.isFinite(c)&&Number.isFinite(y)){allValidRows.push({v,c,y,ch:String(r.channel??r.Channel??'').trim(),file:f.name});n++}
+      });
+      loadedFiles.push({name:f.name,n});
+    }catch(e){errors.push(`${f.name}: ${e.message}`)}
+  }
+  $('#filelist').innerHTML=loadedFiles.map(x=>`✓ ${escapeHTML(x.name)}：${x.n} 筆有效資料`).join('<br>')+
+    (errors.length?'<br><span style="color:#b42318">'+errors.map(escapeHTML).join('<br>')+'</span>':'');
+  refreshChannelSelector();
+  applyChannelFilter();
+}
+function escapeHTML(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function exportXlsx(){
+  if(typeof XLSX==='undefined'){
+    alert('Excel 匯出模組尚未載入。請確認電腦目前可連線後重新開啟此 HTML。');
+    return;
+  }
+  const wb=XLSX.utils.book_new();
+
+  // Sheet 1: 原始 CSV。單檔時完全依原欄位；多檔時增加 source_file 以區分來源。
+  let rawAOA=[];
+  if(rawImports.length===1){
+    const imp=rawImports[0];
+    rawAOA=[imp.headers, ...imp.rows.map(r=>imp.headers.map(k=>r[k]??''))];
+  }else{
+    const headers=[...new Set(rawImports.flatMap(x=>x.headers))];
+    rawAOA=[['source_file',...headers]];
+    rawImports.forEach(imp=>imp.rows.forEach(r=>{
+      rawAOA.push([imp.name,...headers.map(k=>r[k]??'')]);
+    }));
+  }
+  const wsRaw=XLSX.utils.aoa_to_sheet(rawAOA);
+  wsRaw['!cols']=rawAOA[0].map((_,i)=>({wch:Math.min(28,Math.max(10,...rawAOA.slice(0,200).map(r=>String(r[i]??'').length+2)))}));
+  XLSX.utils.book_append_sheet(wb,wsRaw,'原檔');
+
+  // Sheet 2: Q1/Q3/Mean + regional regression on the same worksheet.
+  const aoa=[
+    ['計算使用 Channel', [...selectedChannels].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).join(', ')],
+    [],
+    ['Q1 / Q3 / Mean'],
+    ['Voltage (V)','Concentration (ppm)','N','Q1','Q3','Mean','Q3−Q1','Relative IQR (%)'],
+    ...stats.map(x=>[x.v,x.c,x.n,x.q1,x.q3,x.mean,x.iqr,x.relativeIQR]),
+    [],
+    ['區域濃度線性迴歸'],
+    ['Voltage (V)','Channel','Range (ppm)','Points','Slope','Intercept','R²','Equation','Max Relative IQR (%)'],
+    ...regressions.map(x=>[x.v,x.ch,x.range,x.n,x.slope,x.intercept,x.r2,x.eq,x.maxRelativeIQR])
+  ];
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=[
+    {wch:13},{wch:20},{wch:14},{wch:14},{wch:14},{wch:14},{wch:18},{wch:24},{wch:24}
+  ];
+  XLSX.utils.book_append_sheet(wb,ws,'統計與迴歸');
+
+  const stamp=new Date();
+  const pad=n=>String(n).padStart(2,'0');
+  const name=`log_response_analysis_${stamp.getFullYear()}${pad(stamp.getMonth()+1)}${pad(stamp.getDate())}_${pad(stamp.getHours())}${pad(stamp.getMinutes())}.xlsx`;
+  XLSX.writeFile(wb,name);
+}
+$('#exportXlsx').onclick=exportXlsx;
+
+// CSV 匯入 / 清除事件
+$('#pick').onclick=()=>$('#files').click();
+$('#drop').onclick=()=>$('#files').click();
+$('#files').onchange=e=>load([...e.target.files]);
+$('#clear').onclick=()=>{
+  loadedFiles=[];allValidRows=[];validRows=[];stats=[];regressions=[];rawImports=[];selectedChannels=new Set();
+  $('#files').value='';$('#filelist').innerHTML='';$('#channelBox').style.display='none';$('#channelGrid').innerHTML='';render();
+};
+$('#allChannels').onclick=()=>{
+  document.querySelectorAll('#channelGrid input').forEach(cb=>{cb.checked=true;selectedChannels.add(cb.value)});
+  applyChannelFilter();
+};
+$('#noChannels').onclick=()=>{
+  document.querySelectorAll('#channelGrid input').forEach(cb=>cb.checked=false);
+  selectedChannels.clear();
+  validRows=[]; analyze();
+};
+
+const d=$('#drop');
+['dragenter','dragover'].forEach(ev=>d.addEventListener(ev,e=>{e.preventDefault();d.classList.add('drag')}));
+['dragleave','drop'].forEach(ev=>d.addEventListener(ev,e=>{e.preventDefault();d.classList.remove('drag')}));
+d.addEventListener('drop',e=>load([...e.dataTransfer.files].filter(f=>f.name.toLowerCase().endsWith('.csv'))));
+</script>
+</body></html>
