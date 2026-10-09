@@ -1,0 +1,2831 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Gas Wave Analyzer — R0 / Rgas / Multi‑Voltage</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#151a21; --panel2:#10151b; --line:#2a323d; --text:#e9eef5;
+    --muted:#91a0b2; --accent:#66d9b3; --warn:#f0b35a; --danger:#ef7070; --ok:#7bd88f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,"Segoe UI","Noto Sans TC",sans-serif}
+  header{padding:20px 24px 16px;border-bottom:1px solid var(--line);display:flex;gap:18px;align-items:flex-end;justify-content:space-between;flex-wrap:wrap}
+  h1{font-size:22px;margin:0;letter-spacing:.2px} h2{font-size:16px;margin:0 0 12px} h3{font-size:14px;margin:0}
+  .sub{color:var(--muted);margin-top:4px}.wrap{padding:18px 24px 40px;max-width:1800px;margin:auto}
+  .grid{display:grid;grid-template-columns:360px 1fr;gap:16px}.stack{display:grid;gap:16px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
+  .drop{border:1px dashed #465364;border-radius:8px;padding:20px;text-align:center;background:var(--panel2);cursor:pointer}
+  .drop.drag{border-color:var(--accent);background:#13201d}.drop strong{display:block;font-size:15px;margin-bottom:5px}
+  input,select,button{font:inherit;color:var(--text);background:#0f141a;border:1px solid #34404d;border-radius:6px;padding:7px 9px}
+  input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--accent)}
+  button{cursor:pointer}.primary{background:#17372f;border-color:#2d7964}.ghost{background:#10151b}.danger{border-color:#713d3d;color:#ffb0b0}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.row>*{min-width:0}.grow{flex:1}.label{font-size:12px;color:var(--muted);margin-bottom:4px}
+  .filecard{padding:10px;border:1px solid var(--line);border-radius:8px;background:#11161c;margin-top:8px}.filetitle{font-weight:650;word-break:break-all}
+  .meta{color:var(--muted);font-size:12px;margin-top:3px}.chip{display:inline-block;border:1px solid #3c4957;border-radius:999px;padding:2px 7px;margin:3px 4px 0 0;font-size:11px;color:#bdc8d5}
+  .kpis{display:grid;grid-template-columns:repeat(5,minmax(110px,1fr));gap:8px}.kpi{background:#10151b;border:1px solid var(--line);border-radius:8px;padding:10px}.kpi b{display:block;font-size:19px}.kpi span{color:var(--muted);font-size:11px}
+  canvas{width:100%;height:430px;background:#0d1217;border:1px solid var(--line);border-radius:8px;display:block}
+  .chartbar{display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:10px}.chartbar .field{min-width:120px}
+  .scroll{overflow:auto;max-height:520px;border:1px solid var(--line);border-radius:8px}
+  table{border-collapse:separate;border-spacing:0;width:100%;min-width:1120px;background:#10151b}
+  th,td{border-bottom:1px solid #252d36;border-right:1px solid #202730;padding:6px 7px;white-space:nowrap;text-align:right}
+  th{position:sticky;top:0;background:#171d25;z-index:2;color:#b9c4d1;font-size:12px} td:first-child,th:first-child{text-align:center;position:sticky;left:0;z-index:3;background:#171d25}
+  td:nth-child(2),th:nth-child(2){text-align:left}.tiny{width:74px}.small{width:96px}.med{width:125px}.sensorBad{color:#ffb0b0}.sensorFlat{color:#f0d27c}.muted{color:var(--muted)}
+  .tabs{display:flex;gap:6px;margin-bottom:10px}.tab{padding:7px 10px}.tab.active{background:#1c342d;border-color:#3a806c}
+  .hint{font-size:12px;color:var(--muted)}.sep{height:1px;background:var(--line);margin:12px 0}
+  .status{font-size:12px;color:var(--muted);min-height:18px}.good{color:var(--ok)}.bad{color:var(--danger)}
+  @media(max-width:1050px){.grid{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(2,1fr)}}
+
+  .model-toolbar{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:12px}
+  .model-note{padding:10px 12px;border:1px solid #34404d;border-radius:8px;background:#10151b;color:var(--muted);font-size:12px}
+  .model-result{padding:11px 12px;border:1px solid #3d4b58;border-radius:8px;background:#111820;margin:10px 0}
+  .model-result.goodbox{border-color:#356b58;background:#112019}.model-result.warnbox{border-color:#705b37;background:#211b11}
+  .modelcards{display:grid;grid-template-columns:repeat(4,minmax(170px,1fr));gap:9px;margin:10px 0 14px}
+  .modelcard{border:1px solid var(--line);border-radius:9px;background:#10151b;padding:11px}
+  .modelcard.best{border-color:#4d927a;box-shadow:inset 0 0 0 1px rgba(102,217,179,.12)}
+  .modelcard .name{font-size:12px;color:#cbd5df;margin-bottom:7px}.modelcard .r2{font-size:22px;font-weight:750}
+  .modelcard .minor{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:11px;margin-top:5px}
+  .modelcharts{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+  .modelchartbox{border:1px solid var(--line);border-radius:9px;background:#0f141a;padding:10px;min-width:0}
+  .modelchartbox h3{margin-bottom:7px;color:#cbd5df}
+  .modelchart{width:100%;height:330px;border:0;background:#0d1217}
+  .metric-table{min-width:760px}
+  .besttext{color:var(--ok);font-weight:700}.warntext{color:var(--warn);font-weight:700}
+  @media(max-width:1200px){.modelcharts{grid-template-columns:1fr}.modelcards{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:700px){.modelcards{grid-template-columns:1fr}}
+
+
+  .group-toolbar{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:12px}
+  .group-controls{display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));gap:8px;margin:10px 0 12px}
+  .group-summary{display:grid;grid-template-columns:repeat(3,minmax(220px,1fr));gap:10px;margin:12px 0}
+  .groupbox{border:1px solid var(--line);border-radius:9px;background:#10151b;padding:11px}
+  .groupbox h3{margin:0 0 7px;font-size:13px;color:#d7e0e8}
+  .groupchips{display:flex;gap:6px;flex-wrap:wrap}
+  .rolechip{padding:4px 7px;border:1px solid #394653;border-radius:999px;background:#131b22;font-size:11px}
+  .lowrole{border-color:#446c8a}.highrole{border-color:#805b50}.widerole{border-color:#4d765f}
+  .scorelegend{font-size:11px;color:var(--muted);line-height:1.55}
+  .groupmetric{margin-top:12px}
+  @media(max-width:1200px){.group-controls{grid-template-columns:repeat(3,1fr)}.group-summary{grid-template-columns:1fr}}
+  @media(max-width:700px){.group-controls{grid-template-columns:1fr 1fr}}
+
+</style>
+
+<style>
+#tab-features, #tab-mv, #tab-model { display:none !important; }
+</style>
+
+
+<style id="threeColumnLightTheme">
+/* ===== 亮色三欄工作區 ===== */
+:root{
+  --bg:#f3f7fb;
+  --panel:#ffffff;
+  --panel2:#f8fbff;
+  --line:#d8e2ec;
+  --text:#1f2937;
+  --muted:#64748b;
+  --accent:#0f9f7f;
+  --warn:#d97706;
+  --danger:#dc4c4c;
+  --ok:#16865f;
+}
+body{
+  background:var(--bg);
+  color:var(--text);
+}
+header{
+  background:#ffffff;
+  border-bottom:1px solid var(--line);
+  box-shadow:0 1px 10px rgba(51,65,85,.06);
+  padding:14px 18px 12px;
+}
+.wrap{
+  max-width:none;
+  width:100%;
+  margin:0;
+  padding:12px 14px 26px;
+}
+.grid{
+  display:grid;
+  grid-template-columns:minmax(285px,320px) minmax(500px,.9fr) minmax(590px,1.1fr);
+  gap:12px;
+  align-items:start;
+}
+.grid > aside{
+  grid-column:1;
+  min-width:0;
+}
+.grid > main{
+  display:contents;
+}
+.grid > main > section:nth-child(1){
+  display:none; /* KPI 併入工作流程後不佔中央空間 */
+}
+.grid > main > section:nth-child(2){
+  grid-column:2;
+  grid-row:1;
+  min-width:0;
+  align-self:start;
+}
+.grid > main > section:nth-child(3){
+  grid-column:3;
+  grid-row:1;
+  min-width:0;
+  align-self:start;
+}
+.panel,
+.filecard,
+.kpi,
+.model-note,
+.model-result,
+.modelcard,
+.modelchartbox,
+.groupbox{
+  background:#ffffff;
+  border-color:var(--line);
+  box-shadow:0 1px 3px rgba(15,23,42,.035);
+}
+.drop{
+  background:#f8fbff;
+  border-color:#aebdcb;
+}
+.drop.drag{
+  border-color:var(--accent);
+  background:#ecfdf7;
+}
+input,select,button{
+  color:#1f2937;
+  background:#ffffff;
+  border-color:#cbd7e3;
+}
+input:focus,select:focus{
+  outline:2px solid rgba(15,159,127,.18);
+  border-color:var(--accent);
+}
+button:hover{background:#f4f8fb}
+.primary{
+  background:#e8faf4;
+  border-color:#6bc8ae;
+  color:#116149;
+}
+.primary:hover{background:#d8f5eb}
+.ghost{background:#ffffff}
+.danger{border-color:#e8a4a4;color:#b42323;background:#fff7f7}
+.sep{background:var(--line)}
+.tabs{
+  position:sticky;
+  top:0;
+  z-index:8;
+  background:#ffffff;
+  padding:2px 0 8px;
+}
+.tab.active{
+  background:#e8faf4;
+  border-color:#6bc8ae;
+  color:#116149;
+}
+.scroll{
+  border-color:var(--line);
+  background:#ffffff;
+}
+table{background:#ffffff}
+th{
+  background:#eef4f9;
+  color:#475569;
+  border-color:#dde5ed;
+}
+td{
+  background:#ffffff;
+  border-color:#e8eef4;
+}
+td:first-child,th:first-child{
+  background:#f3f7fb;
+}
+tr.wave-file-active td{
+  background:#eaf7ff !important;
+}
+tr.wave-file-active td:first-child{
+  background:#dff1fb !important;
+}
+canvas{
+  background:#ffffff !important;
+  border-color:var(--line);
+}
+#waveTooltip,#chartTooltip,#algorithmTooltip{
+  background:#ffffff !important;
+  color:#1f2937 !important;
+  border-color:#b9c9d8 !important;
+  box-shadow:0 8px 24px rgba(15,23,42,.14);
+}
+#tab-waves .scroll{
+  max-height:calc(100vh - 255px);
+}
+#tab-predict .scroll{
+  max-height:430px;
+}
+.grid > aside,
+.grid > main > section:nth-child(2),
+.grid > main > section:nth-child(3){
+  max-height:calc(100vh - 100px);
+  overflow:auto;
+  scrollbar-gutter:stable;
+}
+.grid > main > section:nth-child(2){
+  overflow:visible;
+}
+#chart{
+  height:min(58vh,620px);
+  min-height:430px;
+}
+@media(max-width:1450px){
+  .grid{grid-template-columns:280px minmax(440px,.9fr) minmax(520px,1.1fr)}
+}
+@media(max-width:1180px){
+  .grid{grid-template-columns:1fr}
+  .grid > aside,
+  .grid > main > section:nth-child(2),
+  .grid > main > section:nth-child(3){
+    grid-column:1;
+    grid-row:auto;
+    max-height:none;
+    overflow:visible;
+  }
+  .grid > main{display:contents}
+}
+</style>
+
+
+<style id="topSettingsBottomTwoColumns">
+/* ===== 上列設定 + 下列雙欄 ===== */
+.wrap{
+  max-width:none;
+  width:100%;
+  margin:0;
+  padding:12px 14px 26px;
+}
+.grid{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  grid-template-rows:auto auto;
+  gap:12px;
+  align-items:start;
+}
+
+/* 左側原本兩個設定區塊改成最上方，橫跨全頁 */
+.grid > aside{
+  grid-column:1 / -1;
+  grid-row:1;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  gap:12px;
+  max-height:none;
+  overflow:visible;
+}
+.grid > aside > section.panel:nth-of-type(1){
+  grid-column:1;
+}
+.grid > aside > section.panel:nth-of-type(2){
+  grid-column:2;
+}
+.grid > aside > #sensorQC{
+  display:none !important;
+}
+
+/* main 直接展開：波形左、標記/驗證右 */
+.grid > main{
+  display:contents;
+}
+.grid > main > section:nth-child(1){
+  display:none;
+}
+.grid > main > section:nth-child(2){
+  grid-column:1;
+  grid-row:2;
+  min-width:0;
+  max-height:none;
+  overflow:visible;
+}
+.grid > main > section:nth-child(3){
+  grid-column:2;
+  grid-row:2;
+  min-width:0;
+  max-height:none;
+  overflow:visible;
+}
+
+/* 下列左右行視覺高度更一致 */
+.grid > main > section:nth-child(2),
+.grid > main > section:nth-child(3){
+  min-height:calc(100vh - 250px);
+}
+#chart{
+  height:min(62vh,650px);
+  min-height:460px;
+}
+#tab-waves .scroll{
+  max-height:calc(100vh - 360px);
+}
+
+/* 設定區更緊湊，適合橫排 */
+.grid > aside .panel{
+  height:100%;
+}
+.grid > aside .drop{
+  min-height:92px;
+}
+
+@media(max-width:1050px){
+  .grid{
+    grid-template-columns:1fr;
+    grid-template-rows:auto;
+  }
+  .grid > aside{
+    grid-column:1;
+    grid-row:auto;
+    grid-template-columns:1fr;
+  }
+  .grid > aside > section.panel:nth-of-type(1),
+  .grid > aside > section.panel:nth-of-type(2),
+  .grid > main > section:nth-child(2),
+  .grid > main > section:nth-child(3){
+    grid-column:1;
+    grid-row:auto;
+  }
+  .grid > main > section:nth-child(2),
+  .grid > main > section:nth-child(3){
+    min-height:0;
+  }
+}
+</style>
+
+</head>
+<body>
+<header>
+  <div><h1>Gas Wave Analyzer</h1><div class="sub">R0 / Rgas 自動萃取 · 每波標註 Voltage / Gas / Concentration · 多電壓特徵輸出</div></div>
+  <div class="row"><button id="exportFeat" class="primary">匯出 Wave Features CSV</button><button id="exportMV">匯出 Multi‑Voltage CSV</button><button id="exportPNG">匯出目前圖 PNG</button></div>
+</header>
+<div class="wrap">
+  <div class="grid">
+    <aside class="stack">
+      <section class="panel">
+        <h2>1. 載入 CSV</h2>
+        <div id="drop" class="drop"><strong>拖曳多個 CSV 到這裡</strong>或點一下選檔；資料只在本機瀏覽器處理</div>
+        <input id="fileInput" type="file" accept=".csv,text/csv" multiple hidden>
+        <div id="files"></div>
+      </section>
+      <section class="panel">
+        <h2>2. 全域設定</h2>
+        <div class="label">R0 / Rgas 統計窗長（秒）</div>
+        <div class="row"><input id="winSec" type="number" value="10" min="3" max="60" class="small"><button id="recalc">重新計算</button></div>
+        <div class="sep"></div>
+        <div class="label">濃度序列（逗號分隔，依 Wave 1→N）</div>
+        <input id="concSeq" class="grow" style="width:100%" value="0.2,0.4,0.6,0.8,1,2,4,6,8,10,20,40,60,80,100,200">
+        <div class="row" style="margin-top:8px"><button id="applyConc">套用到全部檔案</button><select id="concUnit"><option>ppm</option><option>ppb</option><option>%</option></select></div>
+        <div class="sep"></div>
+        <div class="hint">R0 = 氣體進入前最後 N 秒中位數；Rgas = 氣體移除前最後 N 秒中位數。中位數比單點或平均值更不容易受突波影響。</div>
+      </section>
+      <div id="sensorQC" hidden></div>
+    </aside>
+
+    <main class="stack">
+      <section class="panel">
+        <div class="kpis">
+          <div class="kpi"><b id="kFiles">0</b><span>CSV files</span></div>
+          <div class="kpi"><b id="kWaves">0</b><span>Detected waves</span></div>
+          <div class="kpi"><b id="kSensors">0</b><span>Sensor channels</span></div>
+          <div class="kpi"><b id="kVoltage">—</b><span>Voltages</span></div>
+          <div class="kpi"><b id="kRows">0</b><span>Feature rows</span></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>波形顯示</h2>
+        <div class="chartbar">
+          <div class="field"><div class="label">檔案</div><select id="chartFile"></select></div>
+          <div class="field"><div class="label">通道</div><select id="chartSensor"></select></div>
+          <div class="field"><div class="label">顯示</div><select id="chartMode"><option value="raw">Raw resistance</option><option value="norm">R / R0</option><option value="response">Response = R0 / R</option></select></div>
+          <div class="field"><div class="label">Y 軸</div><select id="yScale"><option value="linear">Linear</option><option value="log">Log</option></select></div>
+          <div class="grow"></div>
+          <button id="waveResetView" type="button">重設視圖</button>
+          <div id="chartStatus" class="status"></div>
+        </div>
+        <div style="position:relative">
+          <canvas id="chart" width="1400" height="430" style="cursor:crosshair"></canvas>
+          <div id="waveTooltip" style="display:none;position:absolute;pointer-events:none;background:#ffffff;color:#1f2937;border:1px solid #b9c9d8;border-radius:8px;padding:7px 9px;font-size:12px;line-height:1.4;z-index:10"></div>
+        </div>
+        <div class="hint">滾輪縮放｜拖曳水平平移｜移動滑鼠查看時間與數值｜雙擊或按「重設視圖」恢復</div>
+      </section>
+
+      <section class="panel">
+        <div class="tabs"><button class="tab active" data-tab="waves">Wave 標註</button><button class="tab" data-tab="predict">Prediction / Validation</button></div>
+        <div id="tab-waves">
+          <div class="row" style="margin-bottom:8px">
+            <button id="addWave" class="primary">＋ 手動加波</button>
+            <button id="importMVWaveRanges">匯入 Wave 設定 CSV</button><div class="hint" style="margin-top:6px">
+      依 <b>file 檔名</b>比對：同名就套用 Wave 順位、Start、End、濃度、Gas、Unit；不同名直接略過。
+      CSV 中尚未載入的檔案設定會保留在本次頁面，之後載入同名 CSV 時自動套用。
+    </div>
+            <input id="importMVWaveFile" type="file" accept=".csv,text/csv" hidden>
+          </div>
+          <div class="hint" style="margin-bottom:8px">載入時先自動偵測 Wave；若少抓，可使用「＋ 手動加波」。各 Wave 可用 ↑ / ↓ 調整順位。Wave 設定 CSV 可依 file 檔名匯回 Start / End / 濃度等設定。</div>
+          <div class="scroll"><table id="waveTable"><thead><tr><th>#</th><th>File</th><th>Start(s)</th><th>End(s)</th><th>Voltage(V)</th><th>Gas</th><th>Conc.</th><th>Unit</th><th>R0 window</th><th>Rgas window</th><th>順位</th><th>Action</th></tr></thead><tbody></tbody></table></div>
+        </div>
+        <div id="tab-features" hidden><div class="scroll"><table id="featTable"></table></div></div>
+        <div id="tab-mv" hidden><div class="scroll"><table id="mvTable"></table></div></div>
+        <div id="tab-model" hidden>
+          <div class="model-toolbar">
+            <button id="runModelCompare" class="primary">重新比較模型</button>
+            <button id="exportModelMetrics">匯出 Metrics CSV</button>
+            <button id="exportModelPred">匯出 Predictions CSV</button>
+            <button id="exportModelResp">匯出 Response CSV</button><button id="exportRespPNG">Response 圖 PNG</button><button id="exportPredPNG">Prediction 圖 PNG</button>
+            <div class="grow"></div>
+            <div id="modelStatus" class="status"></div>
+          </div>
+          <div class="model-note">
+            第一版比較規則：每個單電壓模型使用共同有效通道的 <b>ln(R0/Rgas)</b>；多電壓融合將各電壓特徵串接。<br><span class="warntext">目前預載濃度序列採第一版假設：0.2, 0.4, 0.6, 0.8, 1, 2, 4, 6, 8, 10, 20 ppm；請依你的實際實驗順序修改。</span>
+            模型採 <b>Ridge Regression + nested LOOCV</b>，外層每次留 1 個濃度點作測試，內層只用訓練資料選擇 α，避免直接用訓練集 R² 高估準確度。
+          </div>
+          <div id="modelConclusion" class="model-result">請先為各 Wave 輸入濃度，再按「重新比較模型」。</div>
+          <div id="modelCards" class="modelcards"></div>
+          <div class="modelcharts">
+            <div class="modelchartbox"><h3>Response vs Concentration</h3><canvas id="responseChart" class="modelchart" width="900" height="330"></canvas></div>
+            <div class="modelchartbox"><h3>Actual vs LOOCV Predicted</h3><canvas id="predictionChart" class="modelchart" width="900" height="330"></canvas></div>
+          </div>
+          <div class="hint" id="modelSensors" style="margin:8px 0"></div>
+          <div class="scroll" style="max-height:320px"><table id="modelMetricTable" class="metric-table"></table></div>
+          <div style="height:10px"></div>
+          <div class="scroll" style="max-height:320px"><table id="modelPredTable"></table></div>
+
+        </div>
+        <div id="tab-predict" hidden>
+          <div class="model-note" style="margin-bottom:10px">
+            保留完整 Single / Multi-Voltage 模型計算：Linear、Ridge、SVR、Random Forest，並同時輸出全濃度、0.2–1 ppm、2–200 ppm 的 R²、RMSE、MAE。
+          </div>
+          
+          <div class="model-note" style="margin-bottom:10px">
+            驗證流程：先在 <b>Wave 標註</b> 完成 Start / End / 濃度並匯出 wave_features.csv；驗證時分別匯入
+            <b>1. 訓練波</b> 與 <b>2. 預測波</b>，直接使用已萃取的特徵進行 Single / Multi-Voltage 驗證。預測波的 <b>voltage_V</b> 會直接決定 A–P 各通道對應哪一組訓練波；<b>0 V 自動停用</b>，而<b>沒有匯入對應 Training 電壓的 Prediction 通道會自動略過</b>，不再讓整體驗證失敗。
+          </div>
+<div class="group-controls" style="grid-template-columns:1fr 1fr">
+            <div class="field">
+              <div class="label">1. 訓練波 wave_features CSV</div>
+              <button id="pickTrainingFeatures" class="primary">匯入訓練波</button>
+              <input id="trainingFeatureFile" type="file" accept=".csv,text/csv" multiple hidden>
+              <div id="trainingFeatureStatus" class="status" style="margin-top:6px">尚未匯入訓練波</div>
+              <div id="trainingFeatureList" class="hint" style="margin-top:4px"></div>
+            </div>
+            <div class="field">
+              <div class="label">2. 預測波 wave_features CSV</div>
+              <button id="pickPredictionFeatures" class="primary">匯入預測波</button>
+              <input id="predictionFeatureFile2" type="file" accept=".csv,text/csv" multiple hidden>
+              <div id="predictionFeatureStatus2" class="status" style="margin-top:6px">尚未匯入預測波</div>
+              <div id="predictionFeatureList2" class="hint" style="margin-top:4px"></div>
+            </div>
+          </div>
+
+          <div class="group-toolbar">
+            <button id="runUnifiedCompare" class="primary">計算 Single + Multi-Voltage</button>
+            <button id="exportUnifiedCompare">匯出模型結果 CSV</button>
+            <div class="grow"></div><div id="unifiedStatus" class="status"></div>
+          </div>
+
+          <div class="scroll" style="max-height:430px">
+            <table id="unifiedTable"></table>
+          </div>
+        </div>
+        </div>
+
+      </section>
+    </main>
+  </div>
+</div>
+<script>
+'use strict';
+const state={files:[],features:[],mv:[],selectedFile:0,selectedSensor:'B',modelMetrics:[],modelPredictions:[],modelResponses:[],modelLast:null,groupScores:[],groupAssignment:[],groupLast:null,predictionFile:null,predictionFiles:[],predictionRows:[],predictionMetrics:null,threeWayRows:[],threeWayPredictions:[],interactiveChartState:null,algorithmRows:[],algorithmPredictions:[],algorithmChartState:null,unifiedRows:[],unifiedPredictions:[],waveCSVLookup:new Map(),validationFeatureSets:[],trainingFeatureSets:[],selectedWaveSource:'training',selectedValidationFile:0};
+const $=s=>document.querySelector(s); const $$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+function median(a){const b=a.filter(Number.isFinite).slice().sort((x,y)=>x-y); if(!b.length)return NaN; const m=b.length>>1; return b.length%2?b[m]:(b[m-1]+b[m])/2}
+function mean(a){const b=a.filter(Number.isFinite);return b.length?b.reduce((x,y)=>x+y,0)/b.length:NaN}
+function std(a){const m=mean(a);return Math.sqrt(mean(a.map(x=>(x-m)**2)))}
+function clamp(x,a,b){return Math.max(a,Math.min(b,x))}
+function rollingMedian(a,w=5){const r=[];let h=Math.floor(w/2);for(let i=0;i<a.length;i++)r.push(median(a.slice(Math.max(0,i-h),Math.min(a.length,i+h+1))));return r}
+function parseCSV(txt){
+  const lines=txt.replace(/^\uFEFF/,'').split(/\r?\n/).filter(x=>x.trim().length); if(lines.length<2)throw new Error('CSV 無資料');
+  const parseLine=line=>{let out=[],cur='',q=false;for(let i=0;i<line.length;i++){let ch=line[i];if(ch==='"'){if(q&&line[i+1]==='"'){cur+='"';i++}else q=!q}else if(ch===','&&!q){out.push(cur);cur=''}else cur+=ch}out.push(cur);return out};
+  const headers=parseLine(lines[0]).map(x=>x.trim()); const cols={};headers.forEach(h=>cols[h]=[]);
+  for(let i=1;i<lines.length;i++){const v=parseLine(lines[i]);headers.forEach((h,j)=>{let z=(v[j]??'').trim();let n=Number(z);cols[h].push(z!==''&&Number.isFinite(n)?n:z)})}
+  return {headers,cols,n:lines.length-1};
+}
+function inferVoltage(name){const m=name.match(/(\d+(?:\.\d+)?)\s*V/i);return m?Number(m[1]):''}
+function inferGas(name){if(/酒精|乙醇|ethanol/i.test(name))return 'Ethanol';if(/甲醇|methanol/i.test(name))return 'Methanol';if(/丙酮|acetone/i.test(name))return 'Acetone';if(/NO2|二氧化氮/i.test(name))return 'NO2';if(/H2|氫氣/i.test(name))return 'H2';return ''}
+function getSensors(f){return f.headers.filter(h=>/^[A-P]$/.test(h) && f.cols[h].some(Number.isFinite))}
+function qcSensor(a){const x=a.filter(Number.isFinite); if(!x.length)return {status:'bad',cv:0,range:0}; const m=Math.abs(mean(x))||1, r=Math.max(...x)-Math.min(...x), cv=std(x)/m; const zero=x.filter(v=>v===0).length/x.length; const dif=x.slice(1).map((v,i)=>Math.abs(v-x[i])).sort((a,b)=>a-b); const q95=dif.length?dif[Math.floor(.95*(dif.length-1))]/m:0; if(zero>.8)return {status:'bad',cv,range:r}; if(r/m<.02||q95<.003)return {status:'flat',cv,range:r}; return {status:'ok',cv,range:r}}
+function ensembleSignal(f){
+  const sensors=getSensors(f).filter(s=>qcSensor(f.cols[s]).status==='ok');
+  const use=sensors.length?sensors:getSensors(f).filter(s=>qcSensor(f.cols[s]).status!=='bad'); const n=f.n, rows=[];
+  for(const s of use){const a=f.cols[s].map(Number); const base=median(a.slice(0,Math.min(30,a.length)).filter(Number.isFinite)); if(Number.isFinite(base)&&base!==0)rows.push(a.map(v=>v/base))}
+  const med=[];for(let i=0;i<n;i++)med.push(median(rows.map(r=>r[i])));return rollingMedian(med,5)
+}
+function detectWaves(f){
+  const sig=ensembleSignal(f), n=sig.length, time=f.cols['Time(s)']?.map(Number)||[...Array(n)].map((_,i)=>i);
+  const d=sig.map((_,i)=>i===0?0:i===n-1?0:(sig[i+1]-sig[i-1])/2);
+  const expected=($('#concSeq')?.value||'').split(',').map(x=>x.trim()).filter(Boolean).length;
+
+  // 第一層：只抓「可信度高」的明顯下降沿。低濃度不再強迫通過全域 slope threshold。
+  const neg=d.map(x=>-x).filter(x=>Number.isFinite(x)&&x>0).sort((a,b)=>a-b);
+  const q=(p)=>neg.length?neg[Math.floor((neg.length-1)*p)]:0;
+  const noise=Math.max(0.0005,q(.70));
+  const strongThr=Math.max(.0025,noise*2.2,q(.90)*.35);
+  let cand=[];
+  for(let i=3;i<n-3;i++) if(d[i]<-strongThr && d[i]<=d[i-1] && d[i]<d[i+1]) cand.push(i);
+
+  // 同一事件只保留最強下降點；距離用實際時間約 35 s，避免一個 Wave 被重複計數。
+  cand.sort((a,b)=>d[a]-d[b]);
+  let anchors=[];
+  for(const i of cand){
+    if(anchors.every(j=>Math.abs(Number(time[i])-Number(time[j]))>=35)) anchors.push(i);
+    if(anchors.length>=40)break;
+  }
+  anchors.sort((a,b)=>a-b);
+  const t0=Number(time[0]),t1=Number(time[n-1]),edgeT=Math.min(55,Math.max(15,(t1-t0)*.025));
+  anchors=anchors.filter(i=>time[i]>=t0+edgeT && time[i]<=t1-edgeT);
+
+  // 第二層：由明顯 Wave 的間距估算實驗週期。若中間漏一波，將 2T/3T 間距折回基本週期。
+  let period=NaN;
+  if(anchors.length>=3){
+    const gaps=[];for(let i=1;i<anchors.length;i++){const g=time[anchors[i]]-time[anchors[i-1]];if(g>=45)gaps.push(g)}
+    if(gaps.length){
+      const base=Math.min(...gaps.filter(g=>g>0));
+      const folded=gaps.map(g=>g/Math.max(1,Math.round(g/base))).filter(g=>g>=45&&g<=220);
+      period=median(folded.length?folded:gaps);
+    }
+  }
+  // 明顯點不足時，以預期 Wave 數量與有效量測長度提供保守備援。
+  if(!Number.isFinite(period) && expected>=2) period=(t1-t0-2*edgeT)/Math.max(1,expected);
+  period=Math.max(45,Math.min(220,period||100));
+
+  // 第三層：建立固定週期格點。選擇 anchor 作基準，找出最能對齊全部明顯下降沿的 offset。
+  let grid=[];
+  if(expected>0 && anchors.length){
+    let best=null;
+    for(const ai of anchors){
+      for(let k=0;k<expected;k++){
+        const first=time[ai]-k*period;
+        const last=first+(expected-1)*period;
+        if(first<t0-0.35*period||last>t1+0.35*period)continue;
+        let err=0,matched=0;
+        for(const a of anchors){
+          const kk=Math.round((time[a]-first)/period);
+          if(kk>=0&&kk<expected){const e=Math.abs(time[a]-(first+kk*period));if(e<.35*period){err+=e;matched++}}
+        }
+        const score=matched*1000-err;
+        if(!best||score>best.score)best={first,score};
+      }
+    }
+    if(best) for(let k=0;k<expected;k++)grid.push(best.first+k*period);
+  }
+  if(!grid.length) grid=anchors.map(i=>Number(time[i]));
+
+  // 第四層：每個預測位置 ±22%T 做局部精修。
+  // Score 同時考慮局部下降斜率與前後平台差，因此 0.2/0.4 ppm 的緩慢變化也能被定位。
+  const chosen=[];
+  const nearestIdx=(tt)=>{let lo=0,hi=n-1;while(lo<hi){const m=(lo+hi)>>1;if(time[m]<tt)lo=m+1;else hi=m}return lo};
+  for(const gt of grid){
+    const c=nearestIdx(gt),rad=Math.max(8,Math.round(period*.22));
+    let bestI=c,bestScore=-Infinity;
+    for(let i=Math.max(5,c-rad);i<=Math.min(n-6,c+rad);i++){
+      const w=Math.max(4,Math.min(12,Math.round(period*.08)));
+      const pre=median(sig.slice(Math.max(0,i-w),i));
+      const post=median(sig.slice(i+2,Math.min(n,i+w+2)));
+      const drop=Number.isFinite(pre)&&Number.isFinite(post)?pre-post:0;
+      const localSlope=Math.max(0,-d[i]);
+      const distPenalty=Math.abs(i-c)/Math.max(1,rad)*noise*.35;
+      const score=Math.max(0,drop)+localSlope*3-distPenalty;
+      if(score>bestScore){bestScore=score;bestI=i}
+    }
+    chosen.push(bestI);
+  }
+  chosen.sort((a,b)=>a-b);
+
+  // End：在下一個 Wave 前尋找最強回復沿，讓 Rgas 落在低阻平台末端。
+  const waves=[];
+  for(let wi=0;wi<chosen.length;wi++){
+    const s=chosen[wi];
+    const next=wi<chosen.length-1?chosen[wi+1]:Math.min(n-1,nearestIdx(time[s]+period));
+    const searchStart=Math.min(n-2,s+Math.max(5,Math.round((next-s)*.15)));
+    const searchEnd=Math.min(n-2,Math.max(searchStart,next-3));
+    let e=searchStart;
+    for(let i=searchStart;i<=searchEnd;i++)if(d[i]>d[e])e=i;
+    if(e<=s+5)e=Math.min(n-2,s+Math.max(10,Math.round((next-s)*.75)));
+    waves.push({startIdx:s,endIdx:e,start:Number(time[s]),end:Number(time[e]),voltage:f.defaultVoltage,gas:f.defaultGas,conc:'',unit:'ppm'});
+  }
+  return waves;
+}
+function idxByTime(f,t){const a=f.cols['Time(s)']?.map(Number)||[];if(!a.length)return clamp(Math.round(t),0,f.n-1);let lo=0,hi=a.length-1;while(lo<hi){let m=(lo+hi)>>1;if(a[m]<t)lo=m+1;else hi=m}return lo}
+function calcFeatures(){
+  const win=Math.max(3,Number($('#winSec').value)||10); let out=[];
+  state.files.forEach((f,fi)=>{
+    const sensors=getSensors(f); const time=f.cols['Time(s)']?.map(Number)||[...Array(f.n)].map((_,i)=>i); const dt=median(time.slice(1).map((x,i)=>x-time[i]).filter(x=>x>0))||1; const nw=Math.max(2,Math.round(win/dt));
+    f.waves.forEach((w,wi)=>{
+      w.startIdx=idxByTime(f,Number(w.start));w.endIdx=idxByTime(f,Number(w.end));
+      const s=w.startIdx,e=w.endIdx; const next=wi<f.waves.length-1?idxByTime(f,Number(f.waves[wi+1].start)):f.n-1;
+      for(const ch of sensors){
+        const a=f.cols[ch].map(Number); const r0a=a.slice(Math.max(0,s-nw),Math.max(1,s-1)); const rgasa=a.slice(Math.max(s,e-nw),Math.max(s+1,e-1));
+        const R0=median(r0a),Rgas=median(rgasa); const R0std=std(r0a),Rgasstd=std(rgasa); const dR=R0-Rgas; const resp=Rgas!==0?R0/Rgas:NaN; const respInv=R0!==0?Rgas/R0:NaN; const logResp=(R0>0&&Rgas>0)?Math.log(R0/Rgas):NaN; const logSigma=(R0>0&&Rgas>0)?Math.sqrt((R0std/R0)**2+(Rgasstd/Rgas)**2):NaN; const pct=R0!==0?(R0-Rgas)/R0*100:NaN;
+        let t90=NaN,rec90=NaN; const target=R0+0.9*(Rgas-R0), down=Rgas<R0;
+        for(let i=s;i<=e;i++){if((down&&a[i]<=target)||(!down&&a[i]>=target)){t90=time[i]-time[s];break}}
+        const rt=Rgas+0.9*(R0-Rgas); for(let i=e;i<=next;i++){if((down&&a[i]>=rt)||(!down&&a[i]<=rt)){rec90=time[i]-time[e];break}}
+        let maxSlope=0,area=0;for(let i=s+1;i<=e;i++){let dti=(time[i]-time[i-1])||dt;maxSlope=Math.max(maxSlope,Math.abs((a[i]-a[i-1])/dti));area+=Math.abs((a[i]-R0)/(R0||1))*dti}
+        const temp=mean((f.cols.TEMP||[]).slice(s,e+1).map(Number)),hum=mean((f.cols.HUMD||[]).slice(s,e+1).map(Number));
+        out.push({file:f.name,wave:wi+1,channel:ch,start_s:w.start,end_s:w.end,voltage_V:w.voltage,gas:w.gas,concentration:w.conc,unit:w.unit,R0,Rgas,R0_std:R0std,Rgas_std:Rgasstd,log_response_sigma:logSigma,delta_R:dR,response_R0_div_Rgas:resp,response_Rgas_div_R0:respInv,log_response_ln:logResp,response_pct:pct,t90_s:t90,recovery90_s:rec90,max_abs_slope_ohm_s:maxSlope,norm_area_s:area,temp_C:temp,humidity_RH:hum});
+      }
+    })
+  }); state.features=out; calcMultiVoltage(); renderFeaturePreview();renderMVPreview();updateKPI();drawChart();
+}
+function calcMultiVoltage(){
+  const groups=new Map(); for(const r of state.features){if(r.concentration===''||r.gas==='')continue; const key=[r.channel,r.gas,r.concentration,r.unit].join('|');if(!groups.has(key))groups.set(key,[]);groups.get(key).push(r)}
+  const mv=[]; for(const [key,rows] of groups){const byV=new Map();for(const r of rows){let v=Number(r.voltage_V);if(Number.isFinite(v)&&!byV.has(v))byV.set(v,r)} const vs=[...byV.keys()].sort((a,b)=>a-b);if(!vs.length)continue;
+    const base=rows[0],o={wave:base.wave,start_s:base.start_s,end_s:base.end_s,channel:base.channel,gas:base.gas,concentration:base.concentration,unit:base.unit,n_voltage:vs.length};
+    for(const v of vs){const r=byV.get(v);o[`R0_${v}V`]=r.R0;o[`Rgas_${v}V`]=r.Rgas;o[`Response_${v}V`]=r.response_R0_div_Rgas;o[`Pct_${v}V`]=r.response_pct;o[`T90_${v}V`]=r.t90_s;o[`Area_${v}V`]=r.norm_area_s}
+    const slope=(ys)=>{if(vs.length<2)return NaN;const xm=mean(vs),ym=mean(ys),num=vs.reduce((s,x,i)=>s+(x-xm)*(ys[i]-ym),0),den=vs.reduce((s,x)=>s+(x-xm)**2,0);return den?num/den:NaN};
+    const res=vs.map(v=>byV.get(v).response_R0_div_Rgas), rg=vs.map(v=>byV.get(v).Rgas), r0=vs.map(v=>byV.get(v).R0);
+    o.response_V_slope=slope(res);o.response_V_mean=mean(res);o.response_V_std=std(res);o.response_V_range=Math.max(...res)-Math.min(...res);o.R0_V_slope=slope(r0);o.Rgas_V_slope=slope(rg);mv.push(o)
+  } state.mv=mv;
+}
+function renderFiles(){
+  $('#files').innerHTML=state.files.map((f,i)=>`<div class="filecard"><div class="filetitle">${esc(f.name)}</div><div class="meta">${f.n} rows · ${getSensors(f).length} sensor columns · ${f.waves.length} waves</div><div class="row" style="margin-top:7px"><input class="tiny fvol" data-fi="${i}" type="number" step="0.1" value="${esc(f.defaultVoltage)}" placeholder="V"><input class="grow fgas" data-fi="${i}" value="${esc(f.defaultGas)}" placeholder="Gas"><button class="danger frem" data-fi="${i}">移除</button></div></div>`).join('');
+  $$('.fvol').forEach(x=>x.onchange=e=>{let f=state.files[+e.target.dataset.fi];f.defaultVoltage=e.target.value;f.waves.forEach(w=>w.voltage=e.target.value);renderWaveTable();calcFeatures()});
+  $$('.fgas').forEach(x=>x.onchange=e=>{let f=state.files[+e.target.dataset.fi];f.defaultGas=e.target.value;f.waves.forEach(w=>w.gas=e.target.value);renderWaveTable();calcFeatures()});
+  $$('.frem').forEach(x=>x.onclick=e=>{state.files.splice(+e.target.dataset.fi,1);state.selectedFile=0;refreshAll()});
+}
+function concentrationSequence(){return ($('#concSeq')?.value||'').split(',').map(x=>x.trim()).filter(Boolean)}
+function cloneWaveRangesToFile(source,target){
+  const seq=concentrationSequence(),unit=$('#concUnit')?.value||'ppm';
+  target.waves=source.waves.map((w,i)=>({
+    startIdx:idxByTime(target,Number(w.start)),endIdx:idxByTime(target,Number(w.end)),
+    start:Number(w.start),end:Number(w.end),voltage:target.defaultVoltage,gas:target.defaultGas,
+    conc:seq[i]??w.conc??'',unit:w.unit||unit
+  })).filter(w=>w.end>w.start);
+}
+function estimateWavePeriod(waves){
+  const starts=waves.map(w=>Number(w.start)).filter(Number.isFinite).sort((a,b)=>a-b);
+  const gaps=[];for(let i=1;i<starts.length;i++){const g=starts[i]-starts[i-1];if(g>20)gaps.push(g)}
+  return median(gaps);
+}
+function renderWaveTable(){
+  let html='',global=0;state.files.forEach((f,fi)=>f.waves.forEach((w,wi)=>{global++;html+=`<tr data-fi="${fi}" class="${fi===state.selectedFile?'wave-file-active':''}"><td>${global}</td><td>${esc(f.name)}</td><td><input class="tiny wstart" data-fi="${fi}" data-wi="${wi}" type="number" value="${w.start}"></td><td><input class="tiny wend" data-fi="${fi}" data-wi="${wi}" type="number" value="${w.end}"></td><td><input class="tiny wvol" data-fi="${fi}" data-wi="${wi}" type="number" step="0.1" value="${esc(w.voltage)}"></td><td><input class="med wgas" data-fi="${fi}" data-wi="${wi}" value="${esc(w.gas)}"></td><td><input class="small wconc" data-fi="${fi}" data-wi="${wi}" value="${esc(w.conc)}"></td><td><select class="wunit" data-fi="${fi}" data-wi="${wi}"><option ${w.unit==='ppm'?'selected':''}>ppm</option><option ${w.unit==='ppb'?'selected':''}>ppb</option><option ${w.unit==='%'?'selected':''}>%</option></select></td><td>${Math.max(0,w.start-(Number($('#winSec').value)||10)).toFixed(0)}–${w.start}</td><td>${Math.max(w.start,w.end-(Number($('#winSec').value)||10)).toFixed(0)}–${w.end}</td><td><button class="wup" data-fi="${fi}" data-wi="${wi}" title="順位往前" ${wi===0?'disabled':''}>↑</button> <button class="wdown" data-fi="${fi}" data-wi="${wi}" title="順位往後" ${wi===f.waves.length-1?'disabled':''}>↓</button></td><td><button class="danger wdel" data-fi="${fi}" data-wi="${wi}">刪除</button></td></tr>`}));
+  $('#waveTable tbody').innerHTML=html;
+  const bind=(cl,key)=>$$('.'+cl).forEach(x=>x.onchange=e=>{const w=state.files[+e.target.dataset.fi].waves[+e.target.dataset.wi];w[key]=e.target.value;calcFeatures()});
+  bind('wstart','start');bind('wend','end');bind('wvol','voltage');bind('wgas','gas');bind('wconc','conc');bind('wunit','unit');
+  $$('.wup').forEach(x=>x.onclick=e=>{const fi=+e.target.dataset.fi,wi=+e.target.dataset.wi,f=state.files[fi];if(wi>0){[f.waves[wi-1],f.waves[wi]]=[f.waves[wi],f.waves[wi-1]];renderWaveTable();calcFeatures();drawChart()}});
+  $$('.wdown').forEach(x=>x.onclick=e=>{const fi=+e.target.dataset.fi,wi=+e.target.dataset.wi,f=state.files[fi];if(wi<f.waves.length-1){[f.waves[wi+1],f.waves[wi]]=[f.waves[wi],f.waves[wi+1]];renderWaveTable();calcFeatures();drawChart()}});
+  $$('.wdel').forEach(x=>x.onclick=e=>{state.files[+e.target.dataset.fi].waves.splice(+e.target.dataset.wi,1);renderWaveTable();calcFeatures();renderFiles()});
+}
+
+function setActiveTab(name){
+  $$('.tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===name));
+  ['waves','predict'].forEach(t=>{const el=$('#tab-'+t);if(el)el.hidden=(t!==name)});
+}
+function syncWaveTableToSelectedFile(forceWaveTab=true){
+  if(forceWaveTab)setActiveTab('waves');
+  $$('#waveTable tbody tr').forEach(tr=>tr.classList.toggle('wave-file-active',Number(tr.dataset.fi)===state.selectedFile));
+  const row=$(`#waveTable tbody tr[data-fi="${state.selectedFile}"]`);
+  if(!row)return;
+  const sc=row.closest('.scroll');
+  if(sc){
+    const headH=$('#waveTable thead')?.offsetHeight||0;
+    sc.scrollTo({top:Math.max(0,row.offsetTop-headH-4),behavior:'smooth'});
+  }else{
+    row.scrollIntoView({block:'start',behavior:'smooth'});
+  }
+}
+function fmt(v){if(v===''||v==null)return '';if(!Number.isFinite(Number(v)))return esc(v);let x=Number(v);if(Math.abs(x)>=1000)return x.toFixed(2);if(Math.abs(x)>=10)return x.toFixed(3);return x.toFixed(5)}
+function tableFromRows(el,rows,max=300){if(!rows.length){el.innerHTML='<tbody><tr><td class="muted">尚無資料</td></tr></tbody>';return}const keys=Object.keys(rows[0]);el.innerHTML='<thead><tr>'+keys.map(k=>`<th>${esc(k)}</th>`).join('')+'</tr></thead><tbody>'+rows.slice(0,max).map(r=>'<tr>'+keys.map(k=>`<td>${fmt(r[k])}</td>`).join('')+'</tr>').join('')+'</tbody>'}
+function renderFeaturePreview(){tableFromRows($('#featTable'),state.features)} function renderMVPreview(){tableFromRows($('#mvTable'),state.mv)}
+function currentWaveFile(){
+  if(state.selectedWaveSource==='validation'){
+    return state.predictionFiles?.[state.selectedValidationFile]||null;
+  }
+  return state.files[state.selectedFile]||null;
+}
+function updateSelectors(){
+  const cf=$('#chartFile');
+  let opts='';
+  if(state.files.length){
+    opts+='<optgroup label="Training CSV">'+state.files.map((f,i)=>
+      `<option value="t:${i}" ${state.selectedWaveSource==='training'&&i===state.selectedFile?'selected':''}>${esc(f.name)}</option>`
+    ).join('')+'</optgroup>';
+  }
+  if(state.predictionFiles?.length){
+    opts+='<optgroup label="Validation CSV">'+state.predictionFiles.map((f,i)=>
+      `<option value="v:${i}" ${state.selectedWaveSource==='validation'&&i===state.selectedValidationFile?'selected':''}>[Validation] ${esc(f.name)}</option>`
+    ).join('')+'</optgroup>';
+  }
+  cf.innerHTML=opts;
+  const f=currentWaveFile(),ss=f?getSensors(f):[];
+  $('#chartSensor').innerHTML=ss.map(s=>`<option ${s===state.selectedSensor?'selected':''}>${s}</option>`).join('');
+  if(f&&!ss.includes(state.selectedSensor))state.selectedSensor=ss[0]||'';
+}
+function renderQC(){
+  if(!state.files.length){$('#sensorQC').textContent='載入資料後顯示。';return} const all={};state.files.forEach(f=>getSensors(f).forEach(s=>{all[s]??=[];all[s].push(qcSensor(f.cols[s]).status)}));
+  $('#sensorQC').innerHTML=Object.entries(all).map(([s,sts])=>{let st=sts.includes('bad')?'bad':sts.includes('flat')?'flat':'ok',cls=st==='bad'?'sensorBad':st==='flat'?'sensorFlat':'good',txt=st==='bad'?'無效/近零':st==='flat'?'變化很小':'可用';return `<span class="chip ${cls}">${s}: ${txt}</span>`}).join('');
+}
+function updateKPI(){const volts=[...new Set(state.files.map(f=>Number(f.defaultVoltage)).filter(Number.isFinite))].sort((a,b)=>a-b);$('#kFiles').textContent=state.files.length;$('#kWaves').textContent=state.files.reduce((s,f)=>s+f.waves.length,0);$('#kSensors').textContent=state.files.length?Math.max(...state.files.map(f=>getSensors(f).length)):0;$('#kVoltage').textContent=volts.length?volts.join(', ')+' V':'—';$('#kRows').textContent=state.features.length}
+const waveView={xmin:null,xmax:null,drag:false,startX:0,startMin:0,startMax:0,hover:null,eventsBound:false};
+
+function getWaveSeries(){
+  const f=currentWaveFile();
+  if(!f||!state.selectedSensor)return null;
+  const time=f.cols['Time(s)'].map(Number),raw=f.cols[state.selectedSensor].map(Number);
+  const mode=$('#chartMode').value,log=$('#yScale').value==='log';
+  let y=raw.slice();
+  if(mode!=='raw'){
+    for(let wi=0;wi<f.waves.length;wi++){
+      const w=f.waves[wi],ss=idxByTime(f,w.start);
+      const next=f.waves[wi+1],last=next?idxByTime(f,next.start)-1:f.n-1;
+      const prev=Math.max(0,ss-Math.max(3,Number($('#winSec').value)||10));
+      const r0=median(raw.slice(prev,ss));
+      for(let k=ss;k<=Math.min(f.n-1,last);k++)y[k]=mode==='norm'?raw[k]/r0:r0/raw[k];
+    }
+  }
+  return {f,time,raw,y,mode,log};
+}
+function resetWaveView(){
+  const d=getWaveSeries();if(!d||!d.time.length)return;
+  waveView.xmin=d.time[0];waveView.xmax=d.time.at(-1);waveView.hover=null;drawChart();
+}
+function drawChart(){
+  const c=$('#chart'),ctx=c.getContext('2d'),d=getWaveSeries();
+  ctx.clearRect(0,0,c.width,c.height);ctx.fillStyle='#ffffff';ctx.fillRect(0,0,c.width,c.height);
+  if(!d)return;
+  const {f,time,raw,y,mode,log}=d,fullMin=time[0],fullMax=time.at(-1);
+  if(!Number.isFinite(waveView.xmin)||!Number.isFinite(waveView.xmax)||waveView.xmax<=waveView.xmin){waveView.xmin=fullMin;waveView.xmax=fullMax}
+  waveView.xmin=Math.max(fullMin,waveView.xmin);waveView.xmax=Math.min(fullMax,waveView.xmax);
+  if(waveView.xmax-waveView.xmin<1){waveView.xmin=fullMin;waveView.xmax=fullMax}
+  const xmin=waveView.xmin,xmax=waveView.xmax,visible=[];
+  for(let i=0;i<time.length;i++)if(time[i]>=xmin&&time[i]<=xmax&&Number.isFinite(y[i])&&(!log||y[i]>0))visible.push(y[i]);
+  if(!visible.length)return;
+  let ymin=Math.min(...visible),ymax=Math.max(...visible);
+  if(ymax===ymin){ymax+=1;ymin-=1}
+  const pad=(ymax-ymin)*.08||1;ymin-=pad;ymax+=pad;
+  if(log){const pos=visible.filter(v=>v>0);ymin=Math.log10(Math.max(Math.min(...pos)*.9,1e-12));ymax=Math.log10(Math.max(...pos)*1.08)}
+  const L=74,R=22,T=22,B=48,W=c.width-L-R,H=c.height-T-B;
+  const X=x=>L+(x-xmin)/(xmax-xmin)*W;
+  const Y=v=>{const z=log?Math.log10(Math.max(v,1e-12)):v;return T+(ymax-z)/(ymax-ymin)*H};
+
+  f.waves.forEach((w,i)=>{
+    const ws=Number(w.start),we=Number(w.end);if(we<xmin||ws>xmax)return;
+    const x1=X(Math.max(ws,xmin)),x2=X(Math.min(we,xmax));
+    ctx.fillStyle='rgba(102,217,179,.075)';ctx.fillRect(x1,T,x2-x1,H);
+    ctx.fillStyle='#8fb0a7';ctx.font='11px system-ui';
+    ctx.fillText(`${i+1}${w.conc!==''?' · '+w.conc+w.unit:''}`,Math.max(L+2,x1+4),T+14);
+  });
+
+  ctx.strokeStyle='#d9e2ec';ctx.lineWidth=1;ctx.fillStyle='#64748b';ctx.font='11px system-ui';
+  for(let i=0;i<=5;i++){
+    const yy=T+i*H/5;ctx.beginPath();ctx.moveTo(L,yy);ctx.lineTo(L+W,yy);ctx.stroke();
+    let vv=ymax-(ymax-ymin)*i/5;vv=log?10**vv:vv;
+    ctx.fillText(vv>=1000?vv.toFixed(0):vv.toFixed(vv<10?3:2),6,yy+4);
+  }
+  for(let i=0;i<=8;i++){
+    const xx=L+i*W/8;ctx.beginPath();ctx.moveTo(xx,T);ctx.lineTo(xx,T+H);ctx.stroke();
+    const tv=xmin+(xmax-xmin)*i/8;ctx.fillText(tv.toFixed(xmax-xmin<20?1:0),xx-10,T+H+18);
+  }
+
+  ctx.strokeStyle='#2563eb';ctx.lineWidth=1.5;ctx.beginPath();let started=false;
+  for(let i=0;i<time.length;i++){
+    if(time[i]<xmin||time[i]>xmax||!Number.isFinite(y[i])||(log&&y[i]<=0))continue;
+    const xx=X(time[i]),yy=Y(y[i]);if(!started){ctx.moveTo(xx,yy);started=true}else ctx.lineTo(xx,yy);
+  }
+  ctx.stroke();
+
+  if(mode==='raw'){
+    const win=Math.max(3,Number($('#winSec').value)||10),dt=median(time.slice(1).map((x,i)=>x-time[i]).filter(x=>x>0))||1,nw=Math.round(win/dt);
+    f.waves.forEach(w=>{
+      const si=idxByTime(f,w.start),ei=idxByTime(f,w.end);
+      if(time[ei]<xmin||time[si]>xmax)return;
+      const R0=median(raw.slice(Math.max(0,si-nw),si)),Rg=median(raw.slice(Math.max(si,ei-nw),ei));
+      if(time[si]>=xmin&&time[si]<=xmax){ctx.fillStyle='#66d9b3';ctx.beginPath();ctx.arc(X(time[si]),Y(R0),3.8,0,Math.PI*2);ctx.fill()}
+      if(time[ei]>=xmin&&time[ei]<=xmax){ctx.fillStyle='#f0b35a';ctx.beginPath();ctx.arc(X(time[ei]),Y(Rg),3.8,0,Math.PI*2);ctx.fill()}
+    });
+  }
+
+  if(waveView.hover&&waveView.hover.t>=xmin&&waveView.hover.t<=xmax){
+    const hi=waveView.hover.i,hx=X(time[hi]),hy=Y(y[hi]);
+    ctx.save();ctx.setLineDash([4,4]);ctx.strokeStyle='#94a3b8';ctx.beginPath();ctx.moveTo(hx,T);ctx.lineTo(hx,T+H);ctx.stroke();ctx.restore();
+    ctx.fillStyle='#66d9b3';ctx.beginPath();ctx.arc(hx,hy,4.2,0,Math.PI*2);ctx.fill();
+  }
+
+  ctx.fillStyle='#475569';ctx.font='12px system-ui';ctx.fillText('Time (s)',L+W/2-20,c.height-8);
+  ctx.save();ctx.translate(14,T+H/2);ctx.rotate(-Math.PI/2);ctx.fillText(mode==='raw'?'Resistance':mode==='norm'?'R / R0':'R0 / R',0,0);ctx.restore();
+  $('#chartStatus').textContent=`${state.selectedWaveSource==='validation'?'Validation':'Training'} · ${state.selectedSensor} · ${f.waves.length} waves · ${mode} · ${xmin.toFixed(0)}–${xmax.toFixed(0)} s`;
+  waveView.plot={L,R,T,B,W,H,X,Y,xmin,xmax,time,y};
+}
+function bindWaveChartEvents(){
+  if(waveView.eventsBound)return;waveView.eventsBound=true;
+  const c=$('#chart'),tip=$('#waveTooltip');if(!c)return;
+  const mouse=e=>{const r=c.getBoundingClientRect();return {x:(e.clientX-r.left)*c.width/r.width,y:(e.clientY-r.top)*c.height/r.height,rx:e.clientX-r.left,ry:e.clientY-r.top}};
+  c.addEventListener('wheel',e=>{
+    e.preventDefault();if(!waveView.plot)return;
+    const m=mouse(e),p=waveView.plot,frac=Math.max(0,Math.min(1,(m.x-p.L)/p.W));
+    const anchor=p.xmin+frac*(p.xmax-p.xmin),factor=e.deltaY>0?1.22:0.82;
+    const d=getWaveSeries(),fmin=d.time[0],fmax=d.time.at(-1);
+    const span=Math.max(2,Math.min(fmax-fmin,(p.xmax-p.xmin)*factor));
+    let nmin=anchor-frac*span,nmax=nmin+span;
+    if(nmin<fmin){nmax+=fmin-nmin;nmin=fmin} if(nmax>fmax){nmin-=nmax-fmax;nmax=fmax}
+    waveView.xmin=Math.max(fmin,nmin);waveView.xmax=Math.min(fmax,nmax);drawChart();
+  },{passive:false});
+  c.addEventListener('mousedown',e=>{
+    if(!waveView.plot)return;const m=mouse(e);waveView.drag=true;waveView.startX=m.x;waveView.startMin=waveView.xmin;waveView.startMax=waveView.xmax;c.style.cursor='grabbing';
+  });
+  window.addEventListener('mouseup',()=>{waveView.drag=false;if(c)c.style.cursor='crosshair'});
+  c.addEventListener('mousemove',e=>{
+    if(!waveView.plot)return;const m=mouse(e),p=waveView.plot;
+    if(waveView.drag){
+      const span=waveView.startMax-waveView.startMin,dt=-(m.x-waveView.startX)/p.W*span;
+      const d=getWaveSeries(),fmin=d.time[0],fmax=d.time.at(-1);
+      let nmin=waveView.startMin+dt,nmax=waveView.startMax+dt;
+      if(nmin<fmin){nmax+=fmin-nmin;nmin=fmin} if(nmax>fmax){nmin-=nmax-fmax;nmax=fmax}
+      waveView.xmin=nmin;waveView.xmax=nmax;drawChart();return;
+    }
+    if(m.x<p.L||m.x>p.L+p.W||m.y<p.T||m.y>p.T+p.H){tip.style.display='none';return}
+    const t=p.xmin+(m.x-p.L)/p.W*(p.xmax-p.xmin);
+    let lo=0,hi=p.time.length-1;while(lo<hi){const md=(lo+hi)>>1;if(p.time[md]<t)lo=md+1;else hi=md}
+    let i=lo;if(i>0&&Math.abs(p.time[i-1]-t)<Math.abs(p.time[i]-t))i--;
+    waveView.hover={i,t:p.time[i]};drawChart();
+    tip.innerHTML=`<b>${esc(state.selectedSensor)}</b><br>Time: ${p.time[i].toFixed(2)} s<br>Value: ${Number(p.y[i]).toPrecision(6)}`;
+    tip.style.display='block';tip.style.left=`${Math.min(c.clientWidth-150,m.rx+12)}px`;tip.style.top=`${Math.max(4,m.ry-58)}px`;
+  });
+  c.addEventListener('mouseleave',()=>{if(!waveView.drag){tip.style.display='none';waveView.hover=null;drawChart()}});
+  c.addEventListener('dblclick',resetWaveView);
+  $('#waveResetView')?.addEventListener('click',resetWaveView);
+}
+
+function dot(a,b){let s=0;for(let i=0;i<a.length;i++)s+=a[i]*b[i];return s}
+function solveLinear(A,b){
+  const n=A.length,M=A.map((r,i)=>r.slice().concat([b[i]]));
+  for(let k=0;k<n;k++){
+    let p=k;for(let i=k+1;i<n;i++)if(Math.abs(M[i][k])>Math.abs(M[p][k]))p=i;
+    if(Math.abs(M[p][k])<1e-12)M[p][k]=(M[p][k]>=0?1:-1)*1e-12;
+    if(p!==k){const tmp=M[k];M[k]=M[p];M[p]=tmp}
+    const piv=M[k][k];for(let j=k;j<=n;j++)M[k][j]/=piv;
+    for(let i=0;i<n;i++){if(i===k)continue;const f=M[i][k];if(Math.abs(f)<1e-16)continue;for(let j=k;j<=n;j++)M[i][j]-=f*M[k][j]}
+  }
+  return M.map(r=>r[n])
+}
+function prepareRidge(trainX,trainY,testX){
+  const n=trainX.length,p=trainX[0].length,mu=Array(p).fill(0),sd=Array(p).fill(1);
+  for(let j=0;j<p;j++){let sm=0;for(let i=0;i<n;i++)sm+=trainX[i][j];mu[j]=sm/n;let ss=0;for(let i=0;i<n;i++){let d=trainX[i][j]-mu[j];ss+=d*d}let st=Math.sqrt(ss/n);sd[j]=Number.isFinite(st)&&st>1e-12?st:1}
+  const Z=trainX.map(r=>r.map((v,j)=>(v-mu[j])/sd[j])),zt=testX.map((v,j)=>(v-mu[j])/sd[j]);
+  const ym=mean(trainY),yc=trainY.map(v=>v-ym),K=Array.from({length:n},()=>Array(n).fill(0));
+  for(let i=0;i<n;i++)for(let j=i;j<n;j++){const z=dot(Z[i],Z[j]);K[i][j]=z;K[j][i]=z}
+  const kt=Z.map(r=>dot(zt,r));return {K,yc,kt,ym}
+}
+function ridgePreparedPredict(prep,alpha){
+  const A=prep.K.map((r,i)=>{const z=r.slice();z[i]+=alpha;return z});
+  const dual=solveLinear(A,prep.yc);return prep.ym+dot(prep.kt,dual)
+}
+function ridgePredict(trainX,trainY,testX,alpha){return ridgePreparedPredict(prepareRidge(trainX,trainY,testX),alpha)}
+function modelMetrics(y,p){
+  // 標準 regression R²：
+  // R² = 1 - SSE/SST；SST 以 Actual 的平均值為基準。
+  // 先排除 NaN/Infinity，避免單一異常值把整列指標變成 NaN。
+  const pairs=[];
+  for(let i=0;i<Math.min(y.length,p.length);i++){
+    const yy=Number(y[i]),pp=Number(p[i]);
+    if(Number.isFinite(yy)&&Number.isFinite(pp))pairs.push([yy,pp]);
+  }
+  if(!pairs.length)return {R2:NaN,RMSE:NaN,MAE:NaN,N:0,SSE:NaN,SST:NaN};
+
+  const ya=pairs.map(z=>z[0]),pa=pairs.map(z=>z[1]),ym=mean(ya);
+  const sse=ya.reduce((s,v,i)=>s+(v-pa[i])**2,0);
+  const sst=ya.reduce((s,v)=>s+(v-ym)**2,0);
+
+  // R² 至少要有 2 個樣本且 Actual 必須具有變異。
+  // 窄濃度區間若預測誤差大於該區間自身變異，R² 可以合法地小於 0。
+  const eps=1e-15*Math.max(1,ya.reduce((s,v)=>s+v*v,0));
+  const r2=(ya.length>=2 && sst>eps)?1-sse/sst:NaN;
+
+  return {
+    R2:r2,
+    RMSE:Math.sqrt(sse/ya.length),
+    MAE:mean(ya.map((v,i)=>Math.abs(v-pa[i]))),
+    N:ya.length,
+    SSE:sse,
+    SST:sst
+  };
+}
+
+// Validation 區間指標以 Actual concentration 分組。
+// 為避免 2 ppm、20 ppm 同時被算進兩個區間，採不重疊邊界：
+// 0.2 ≤ C < 2、2 ≤ C < 20、20 ≤ C ≤ 200。
+function modelMetricsRange(actual,pred,minConc,maxConc,includeMax=false){
+  const y=[],p=[];
+  for(let i=0;i<Math.min(actual.length,pred.length);i++){
+    const yy=Number(actual[i]),pp=Number(pred[i]);
+    if(!Number.isFinite(yy)||!Number.isFinite(pp))continue;
+    const inRange=yy>=minConc && (includeMax?yy<=maxConc:yy<maxConc);
+    if(inRange){y.push(yy);p.push(pp)}
+  }
+  if(!y.length)return {R2:NaN,RMSE:NaN,MAE:NaN,N:0};
+  const m=modelMetrics(y,p);
+  return {R2:m.R2,RMSE:m.RMSE,MAE:m.MAE,N:m.N};
+}
+function appendRangeMetrics(row,actual,pred){
+  const r1=modelMetricsRange(actual,pred,0.2,2,false);
+  const r2=modelMetricsRange(actual,pred,2,20,false);
+  const r3=modelMetricsRange(actual,pred,20,200,true);
+  return Object.assign(row,{
+    R2_0_2_to_2:r1.R2,
+    RMSE_0_2_to_2_ppm:r1.RMSE,
+    MAE_0_2_to_2_ppm:r1.MAE,
+    N_0_2_to_2:r1.N,
+
+    R2_2_to_20:r2.R2,
+    RMSE_2_to_20_ppm:r2.RMSE,
+    MAE_2_to_20_ppm:r2.MAE,
+    N_2_to_20:r2.N,
+
+    R2_20_to_200:r3.R2,
+    RMSE_20_to_200_ppm:r3.RMSE,
+    MAE_20_to_200_ppm:r3.MAE,
+    N_20_to_200:r3.N
+  });
+}
+function nestedLOOCV(X,y){
+  const n=y.length,pred=Array(n).fill(NaN),chosen=Array(n).fill(NaN),alphas=[];
+  for(let i=0;i<41;i++)alphas.push(10**(-5+i*.25));
+  for(let test=0;test<n;test++){
+    const train=[...Array(n).keys()].filter(i=>i!==test),prepared=[];
+    for(const val of train){const inner=train.filter(i=>i!==val);prepared.push({truth:y[val],prep:prepareRidge(inner.map(i=>X[i]),inner.map(i=>y[i]),X[val])})}
+    let bestA=alphas[0],bestM=Infinity;
+    for(const a of alphas){let se=0;for(const z of prepared){const pp=ridgePreparedPredict(z.prep,a),d=z.truth-pp;se+=d*d}const mse=se/prepared.length;if(mse<bestM){bestM=mse;bestA=a}}
+    const outerPrep=prepareRidge(train.map(i=>X[i]),train.map(i=>y[i]),X[test]);pred[test]=ridgePreparedPredict(outerPrep,bestA);chosen[test]=bestA
+  }
+  return {pred,alpha:chosen}
+}
+function commonModelSensors(){
+  if(!state.files.length)return [];
+  const all='ABCDEFGHIJKLMNOP'.split('');
+  return all.filter(ch=>state.files.every(f=>f.headers.includes(ch)&&qcSensor(f.cols[ch].map(Number)).status==='ok'));
+}
+function collectModelDataset(){
+  const sensors=commonModelSensors(),volts=[...new Set(state.features.map(r=>Number(r.voltage_V)).filter(Number.isFinite))].sort((a,b)=>a-b);
+  if(volts.length<2)return {error:'至少需要 2 個不同電壓資料檔。'};
+  if(!sensors.length)return {error:'找不到所有電壓都共同有效的感測通道。'};
+  const map=new Map();
+  for(const r of state.features){
+    const v=Number(r.voltage_V),c=Number(r.concentration);
+    if(!Number.isFinite(v)||!Number.isFinite(c)||!sensors.includes(r.channel))continue;
+    const k=v+'|'+r.wave;
+    if(!map.has(k))map.set(k,{voltage:v,wave:r.wave,conc:c,unit:r.unit||'',gas:r.gas||'',rows:new Map()});
+    const g=map.get(k);g.rows.set(r.channel,r)
+  }
+  const waveSets=volts.map(v=>new Set([...map.values()].filter(g=>g.voltage===v&&g.rows.size===sensors.length).map(g=>g.wave)));
+  let common=[...waveSets[0]].filter(w=>waveSets.every(s=>s.has(w))).sort((a,b)=>a-b);
+  const samples=[];
+  for(const w of common){
+    const gs=volts.map(v=>map.get(v+'|'+w));
+    if(gs.some(x=>!x))continue;
+    const concs=gs.map(g=>g.conc),units=gs.map(g=>g.unit),gases=gs.map(g=>g.gas);
+    if(Math.max(...concs)-Math.min(...concs)>1e-9)continue;
+    if(new Set(units).size>1||new Set(gases).size>1)continue;
+    const byV={};let ok=true;
+    for(const g of gs){
+      byV[g.voltage]={};
+      for(const ch of sensors){const r=g.rows.get(ch);if(!r||!Number.isFinite(Number(r.log_response_ln))){ok=false;break}byV[g.voltage][ch]=r}
+      if(!ok)break
+    }
+    if(ok)samples.push({wave:w,conc:concs[0],unit:units[0],gas:gases[0],byV})
+  }
+  samples.sort((a,b)=>a.conc-b.conc||a.wave-b.wave);
+  if(samples.length<5)return {error:`可比較的共同濃度點只有 ${samples.length} 個；至少需要 5 個。`,sensors,volts,samples};
+  return {sensors,volts,samples}
+}
+function drawSimpleMultiLine(canvas,x,series,xLabel,yLabel,title,ideal=false){
+  const ctx=canvas.getContext('2d'),W=canvas.width,H=canvas.height,L=62,R=18,T=28,B=46;ctx.clearRect(0,0,W,H);ctx.fillStyle='#ffffff';ctx.fillRect(0,0,W,H);
+  const allY=series.flatMap(s=>s.y).filter(Number.isFinite);if(!x.length||!allY.length)return;
+  let xmin=Math.min(...x),xmax=Math.max(...x),ymin=Math.min(...allY),ymax=Math.max(...allY);
+  if(xmax===xmin){xmin-=1;xmax+=1} if(ymax===ymin){ymin-=1;ymax+=1}
+  let yp=(ymax-ymin)*.10;ymin-=yp;ymax+=yp; if(ymin>0)ymin=0;
+  const PW=W-L-R,PH=H-T-B,X=v=>L+(v-xmin)/(xmax-xmin)*PW,Y=v=>T+(ymax-v)/(ymax-ymin)*PH;
+  ctx.strokeStyle='#d9e2ec';ctx.fillStyle='#64748b';ctx.font='11px system-ui';
+  for(let i=0;i<=5;i++){let yy=T+i*PH/5;ctx.beginPath();ctx.moveTo(L,yy);ctx.lineTo(W-R,yy);ctx.stroke();let v=ymax-(ymax-ymin)*i/5;ctx.fillText(Math.abs(v)>=100?v.toFixed(0):v.toFixed(2),5,yy+4)}
+  for(let i=0;i<=6;i++){let xx=L+i*PW/6;ctx.beginPath();ctx.moveTo(xx,T);ctx.lineTo(xx,T+PH);ctx.stroke();let v=xmin+(xmax-xmin)*i/6;ctx.fillText(v.toFixed(v<10?1:0),xx-10,H-B+18)}
+  const colors=['#66d9b3','#f0b35a','#7aa7ff','#d68cff','#ef7070','#8bd17c'];
+  series.forEach((s,si)=>{ctx.strokeStyle=colors[si%colors.length];ctx.fillStyle=colors[si%colors.length];ctx.lineWidth=s.dashed?1.3:1.8;ctx.setLineDash(s.dashed?[5,4]:[]);ctx.beginPath();let started=false;s.y.forEach((v,i)=>{if(!Number.isFinite(v))return;let xx=X(x[i]),yy=Y(v);if(!started){ctx.moveTo(xx,yy);started=true}else ctx.lineTo(xx,yy)});ctx.stroke();ctx.setLineDash([]);if(!s.dashed)s.y.forEach((v,i)=>{if(!Number.isFinite(v))return;ctx.beginPath();ctx.arc(X(x[i]),Y(v),3,0,Math.PI*2);ctx.fill()})});
+  ctx.fillStyle='#1f2937';ctx.font='12px system-ui';ctx.fillText(title,L,T-10);ctx.fillText(xLabel,L+PW/2-35,H-8);ctx.save();ctx.translate(14,T+PH/2);ctx.rotate(-Math.PI/2);ctx.fillText(yLabel,0,0);ctx.restore();
+  let lx=L+8,ly=T+8;ctx.font='11px system-ui';series.forEach((s,si)=>{ctx.fillStyle=colors[si%colors.length];ctx.fillRect(lx,ly-8,14,3);ctx.fillStyle='#475569';ctx.fillText(s.name,lx+19,ly-4);lx+=Math.max(88,s.name.length*7+38);if(lx>W-180){lx=L+8;ly+=16}});
+}
+function renderModelCompare(result){
+  const {sensors,volts,samples,metrics,predictions,responses}=result;
+  state.modelMetrics=metrics;state.modelPredictions=predictions;state.modelResponses=responses;state.modelLast=result;
+  const best=metrics.slice().sort((a,b)=>a.RMSE-b.RMSE)[0],fusion=metrics.find(x=>/fusion/i.test(x.Model)),bestSingle=metrics.filter(x=>!/fusion/i.test(x.Model)).sort((a,b)=>a.RMSE-b.RMSE)[0];
+  $('#modelCards').innerHTML=metrics.map(m=>`<div class="modelcard ${m.Model===best.Model?'best':''}"><div class="name">${esc(m.Model)}${m.Model===best.Model?' · BEST':''}</div><div class="r2">${m.R2.toFixed(4)}</div><div class="minor"><span>R²</span><span>RMSE ${m.RMSE.toFixed(3)} ${esc(samples[0].unit)}</span></div><div class="minor"><span>MAE ${m.MAE.toFixed(3)} ${esc(samples[0].unit)}</span><span>${m.Feature_count} features</span></div></div>`).join('');
+  let txt=`最佳模型：<span class="besttext">${esc(best.Model)}</span>，R²=${best.R2.toFixed(4)}、RMSE=${best.RMSE.toFixed(3)} ${esc(samples[0].unit)}、MAE=${best.MAE.toFixed(3)} ${esc(samples[0].unit)}。`;
+  let cls='goodbox';
+  if(fusion&&bestSingle){
+    const rm=(fusion.RMSE-bestSingle.RMSE)/bestSingle.RMSE*100,ma=(fusion.MAE-bestSingle.MAE)/bestSingle.MAE*100;
+    if(rm>0){cls='warnbox';txt+=` 目前直接多電壓融合 <span class="warntext">尚未優於 ${esc(bestSingle.Model)}</span>；RMSE 增加 ${rm.toFixed(1)}%，MAE 增加 ${ma.toFixed(1)}%。這表示高電壓特徵需要進一步做特徵選擇或電壓差異特徵，而不是全部直接串接。`}
+    else txt+=` 多電壓融合相較最佳單電壓 RMSE 改善 ${Math.abs(rm).toFixed(1)}%。`
+  }
+  $('#modelConclusion').className='model-result '+cls;$('#modelConclusion').innerHTML=txt;
+  $('#modelSensors').innerHTML=`共同有效通道：<b>${sensors.join(', ')}</b>　｜　電壓：<b>${volts.join(', ')} V</b>　｜　共同樣本：<b>${samples.length}</b>　｜　模型：Ridge + nested LOOCV`;
+  tableFromRows($('#modelMetricTable'),metrics,100);tableFromRows($('#modelPredTable'),predictions,200);
+  const x=samples.map(s=>s.conc),respSeries=volts.map(v=>({name:`${v} V`,y:responses.map(r=>r[`Median_Response_${v}V`])}));
+  drawSimpleMultiLine($('#responseChart'),x,respSeries,'Concentration ('+samples[0].unit+')','Median R0/Rgas','Response–Concentration');
+  const predSeries=[{name:'Ideal',y:x.slice(),dashed:true}].concat(metrics.map(m=>({name:m.Model,y:predictions.map(r=>r['Pred_'+m.Model])})));
+  drawSimpleMultiLine($('#predictionChart'),x,predSeries,'Actual concentration ('+samples[0].unit+')','Predicted concentration','Actual vs LOOCV Predicted');
+}
+function runModelComparison(){
+  $('#modelStatus').textContent='計算中…';
+  setTimeout(()=>{
+    try{
+      const ds=collectModelDataset();if(ds.error){$('#modelStatus').textContent=ds.error;$('#modelConclusion').className='model-result warnbox';$('#modelConclusion').textContent=ds.error;return}
+      const {sensors,volts,samples}=ds,y=samples.map(s=>s.conc),models={};
+      for(const v of volts)models[`${v} V`]=samples.map(s=>sensors.map(ch=>Number(s.byV[v][ch].log_response_ln)));
+      models[`${volts.length}-voltage fusion`]=samples.map(s=>volts.flatMap(v=>sensors.map(ch=>Number(s.byV[v][ch].log_response_ln))));
+      const metrics=[],predictionCols={};
+      for(const [name,X] of Object.entries(models)){
+        const z=nestedLOOCV(X,y),m=modelMetrics(y,z.pred);predictionCols[name]=z.pred;
+        metrics.push({Model:name,R2:m.R2,RMSE:m.RMSE,MAE:m.MAE,Median_selected_alpha:median(z.alpha),Feature_count:X[0].length,N_samples:y.length})
+      }
+      metrics.sort((a,b)=>a.RMSE-b.RMSE);
+      const predictions=samples.map((s,i)=>{const o={Wave:s.wave,Actual:s.conc,Unit:s.unit,Gas:s.gas};for(const name of Object.keys(models))o['Pred_'+name]=predictionCols[name][i];return o});
+      const responses=samples.map(s=>{const o={Wave:s.wave,Concentration:s.conc,Unit:s.unit,Gas:s.gas};for(const v of volts)o[`Median_Response_${v}V`]=median(sensors.map(ch=>Number(s.byV[v][ch].response_R0_div_Rgas)));return o});
+      renderModelCompare({sensors,volts,samples,metrics,predictions,responses});$('#modelStatus').textContent=`完成 · ${samples.length} points`;
+    }catch(e){console.error(e);$('#modelStatus').textContent='模型比較失敗：'+e.message}
+  },30)
+}
+
+
+function norm01(v,maxv){return Number.isFinite(v)&&Number.isFinite(maxv)&&maxv>0?Math.max(0,Math.min(1,v/maxv)):0}
+function aggregateByConcentration(points){
+  const g=new Map();
+  for(const p of points){
+    if(!Number.isFinite(p.c)||!Number.isFinite(p.x))continue;
+    if(!g.has(p.c))g.set(p.c,[]);
+    g.get(p.c).push(p)
+  }
+  return [...g.entries()].map(([c,a])=>({
+    c:Number(c),
+    x:mean(a.map(z=>z.x)),
+    sigma:Math.sqrt(mean(a.map(z=>(Number.isFinite(z.sigma)?z.sigma:0)**2)))
+  })).sort((a,b)=>a.c-b.c)
+}
+function rangeRawMetrics(points){
+  const a=aggregateByConcentration(points);
+  if(a.length<2)return {n:a.length,dprime:0,slope:0,response:a.length?median(a.map(z=>Math.abs(z.x))):0,mono:0,noise:a.length?median(a.map(z=>z.sigma)):NaN};
+  const dp=[],sl=[],signs=[];
+  for(let i=1;i<a.length;i++){
+    const dc=a[i].c-a[i-1].c;if(!(dc>0))continue;
+    const dx=a[i].x-a[i-1].x,den=Math.sqrt((a[i].sigma||0)**2+(a[i-1].sigma||0)**2+1e-12);
+    dp.push(Math.abs(dx)/den);sl.push(Math.abs(dx)/dc);if(Math.abs(dx)>1e-12)signs.push(Math.sign(dx))
+  }
+  let mono=0;if(signs.length){const pos=signs.filter(x=>x>0).length,neg=signs.length-pos;mono=Math.max(pos,neg)/signs.length}
+  return {n:a.length,dprime:median(dp)||0,slope:median(sl)||0,response:median(a.map(z=>Math.abs(z.x)))||0,mono,noise:median(a.map(z=>z.sigma))}
+}
+function collectGroupData(){
+  const ds=collectModelDataset();
+  if(ds.error)return ds;
+  return ds;
+}
+function balancedAssign(sensorRows,volts){
+  const sensors=[...new Set(sensorRows.map(r=>r.Sensor))],m=volts.length,n=sensors.length;
+  const avg=volts.map(v=>({v,avg:mean(sensorRows.filter(r=>r.Voltage===v).map(r=>r.Total_score))})).sort((a,b)=>b.avg-a.avg);
+  const base=Math.floor(n/m),rem=n%m,quota={};volts.forEach(v=>quota[v]=base);for(let i=0;i<rem;i++)quota[avg[i].v]++;
+  const scoreMap=new Map(sensorRows.map(r=>[r.Sensor+'|'+r.Voltage,r.Total_score]));
+  const memo=new Map(),choice=new Map();
+  function rec(i,counts){
+    if(i===n)return 0;
+    const key=i+'|'+counts.join(',');if(memo.has(key))return memo.get(key);
+    let best=-1e99,bv=-1;
+    for(let gi=0;gi<m;gi++){
+      if(counts[gi]>=quota[volts[gi]])continue;
+      const nc=counts.slice();nc[gi]++;
+      const sc=(scoreMap.get(sensors[i]+'|'+volts[gi])??0)+rec(i+1,nc);
+      if(sc>best){best=sc;bv=gi}
+    }
+    memo.set(key,best);choice.set(key,bv);return best
+  }
+  rec(0,Array(m).fill(0));const out={},counts=Array(m).fill(0);
+  for(let i=0;i<n;i++){const key=i+'|'+counts.join(','),gi=choice.get(key);out[sensors[i]]=volts[gi];counts[gi]++}
+  return {assignment:out,quota}
+}
+
+function arrayAdjacentSeparation(samples,sensors,mode,volts,assign,lowMax,highMin){
+  const low=[],high=[],all=[];
+  for(let i=1;i<samples.length;i++){
+    const a=samples[i-1],b=samples[i],dc=b.conc-a.conc;if(!(dc>0))continue;
+    let ss=0;
+    const add=(v,ch)=>{
+      const r0=a.byV[v][ch],r1=b.byV[v][ch],x0=Number(r0.log_response_ln),x1=Number(r1.log_response_ln);
+      const s0=Number(r0.log_response_sigma)||0,s1=Number(r1.log_response_sigma)||0;
+      if(Number.isFinite(x0)&&Number.isFinite(x1))ss+=(x1-x0)**2/(s0*s0+s1*s1+1e-12)
+    };
+    if(mode.type==='single')for(const ch of sensors)add(mode.v,ch);
+    else if(mode.type==='fusion')for(const v of volts)for(const ch of sensors)add(v,ch);
+    else if(mode.type==='grouped')for(const ch of sensors)add(assign[ch],ch);
+    const D=Math.sqrt(ss);all.push(D);
+    if(b.conc<=lowMax)low.push(D);
+    if(a.conc>=highMin)high.push(D);
+  }
+  return {Low_adjacent_separation:median(low),High_adjacent_separation:median(high),All_adjacent_separation:median(all)}
+}
+
+function runGroupOptimization(){
+  $('#groupStatus').textContent='計算中…';
+  setTimeout(()=>{
+    try{
+      const ds=collectGroupData();if(ds.error){$('#groupStatus').textContent=ds.error;$('#groupConclusion').className='model-result warnbox';$('#groupConclusion').textContent=ds.error;return}
+      const {sensors,volts,samples}=ds,lowMax=Number($('#lowMax')?.value),highMin=Number($('#highMin')?.value);
+      if(!(Number.isFinite(lowMax)&&Number.isFinite(highMin)&&highMin>lowMax)){throw new Error('高濃度下限必須大於低濃度上限')}
+      let rw=[Number($('#lowWeight')?.value),Number($('#midWeight')?.value),Number($('#highWeight')?.value)].map(x=>Number.isFinite(x)&&x>=0?x:0);
+      const rws=rw.reduce((a,b)=>a+b,0)||1;rw=rw.map(x=>x/rws);
+      const ranges=[
+        {name:'Low',test:c=>c<=lowMax},
+        {name:'Mid',test:c=>c>lowMax&&c<highMin},
+        {name:'High',test:c=>c>=highMin}
+      ];
+      const raw={};
+      for(const ch of sensors){
+        raw[ch]={};
+        for(const v of volts){
+          raw[ch][v]={};
+          for(const rg of ranges){
+            const pts=samples.filter(s=>rg.test(s.conc)).map(s=>{
+              const r=s.byV[v][ch];
+              return {c:s.conc,x:Number(r.log_response_ln),sigma:Number(r.log_response_sigma)}
+            });
+            raw[ch][v][rg.name]=rangeRawMetrics(pts)
+          }
+        }
+      }
+      const scoreRows=[];
+      for(const ch of sensors){
+        const maxima={};
+        for(const rg of ranges){
+          maxima[rg.name]={
+            dprime:Math.max(...volts.map(v=>raw[ch][v][rg.name].dprime||0)),
+            slope:Math.max(...volts.map(v=>raw[ch][v][rg.name].slope||0)),
+            response:Math.max(...volts.map(v=>raw[ch][v][rg.name].response||0))
+          }
+        }
+        for(const v of volts){
+          const rr={Sensor:ch,Voltage:v};
+          let total=0;
+          ranges.forEach((rg,ri)=>{
+            const z=raw[ch][v][rg.name],mx=maxima[rg.name];
+            const sc=0.50*norm01(z.dprime,mx.dprime)+0.25*norm01(z.slope,mx.slope)+0.10*norm01(z.response,mx.response)+0.15*(z.mono||0);
+            rr[rg.name+'_score']=sc;rr[rg.name+'_dprime']=z.dprime;rr[rg.name+'_slope']=z.slope;rr[rg.name+'_response']=z.response;rr[rg.name+'_monotonicity']=z.mono;rr[rg.name+'_n']=z.n;
+            total+=rw[ri]*sc
+          });
+          rr.Total_score=total;scoreRows.push(rr)
+        }
+      }
+      let assign={};
+      if($('#groupMode')?.value==='balanced'){
+        assign=balancedAssign(scoreRows,volts).assignment
+      }else{
+        for(const ch of sensors){
+          const a=scoreRows.filter(r=>r.Sensor===ch).sort((a,b)=>b.Total_score-a.Total_score);
+          assign[ch]=a[0].Voltage
+        }
+      }
+      const assignment=[];
+      for(const ch of sensors){
+        const v=assign[ch],r=scoreRows.find(z=>z.Sensor===ch&&z.Voltage===v);
+        const d=(r.Low_score||0)-(r.High_score||0);let role=Math.abs(d)<0.12?'Wide range':d>0?'Low concentration':'High concentration';
+        assignment.push({Sensor:ch,Assigned_voltage_V:v,Role:role,Low_score:r.Low_score,Mid_score:r.Mid_score,High_score:r.High_score,Total_score:r.Total_score})
+      }
+      assignment.sort((a,b)=>a.Assigned_voltage_V-b.Assigned_voltage_V||a.Sensor.localeCompare(b.Sensor));
+      const y=samples.map(s=>s.conc),models={};
+      for(const v of volts)models[`${v} V`]=samples.map(s=>sensors.map(ch=>Number(s.byV[v][ch].log_response_ln)));
+      models[`${volts.length}-voltage full fusion`]=samples.map(s=>volts.flatMap(v=>sensors.map(ch=>Number(s.byV[v][ch].log_response_ln))));
+      models['Grouped-array']=samples.map(s=>sensors.map(ch=>Number(s.byV[assign[ch]][ch].log_response_ln)));
+      const metrics=[];
+      for(const [name,X] of Object.entries(models)){
+        const z=nestedLOOCV(X,y),m=modelMetrics(y,z.pred);
+        let sep;
+        if(name.endsWith(' V'))sep=arrayAdjacentSeparation(samples,sensors,{type:'single',v:Number(name.replace(' V',''))},volts,assign,lowMax,highMin);
+        else if(name.includes('full fusion'))sep=arrayAdjacentSeparation(samples,sensors,{type:'fusion'},volts,assign,lowMax,highMin);
+        else sep=arrayAdjacentSeparation(samples,sensors,{type:'grouped'},volts,assign,lowMax,highMin);
+        metrics.push({Model:name,R2_LOOCV:m.R2,RMSE:m.RMSE,MAE:m.MAE,Low_adjacent_separation:sep.Low_adjacent_separation,High_adjacent_separation:sep.High_adjacent_separation,Feature_count:X[0].length,N_samples:y.length})
+      }
+      metrics.sort((a,b)=>a.RMSE-b.RMSE);
+      state.groupScores=scoreRows;state.groupAssignment=assignment;state.groupLast={assignment,metrics,scoreRows,lowMax,highMin,rw,volts,sensors};
+      renderGroupOptimization(state.groupLast);
+      $('#groupStatus').textContent=`完成 · ${sensors.length} channels · ${volts.length} voltage groups`;
+    }catch(e){console.error(e);$('#groupStatus').textContent='分群失敗：'+e.message}
+  },30)
+}
+function renderGroupOptimization(r){
+  const {assignment,metrics,scoreRows,lowMax,highMin,rw,volts}=r,best=metrics[0],grp=metrics.find(x=>x.Model==='Grouped-array');
+  const groups=volts.map(v=>({v,rows:assignment.filter(a=>a.Assigned_voltage_V===v)}));
+  $('#groupBoxes').innerHTML=groups.map(g=>`<div class="groupbox"><h3>${g.v} V · ${g.rows.length} channels</h3><div class="groupchips">${g.rows.map(a=>`<span class="rolechip ${a.Role.startsWith('Low')?'lowrole':a.Role.startsWith('High')?'highrole':'widerole'}">${esc(a.Sensor)} · ${esc(a.Role.replace(' concentration',''))}</span>`).join('')}</div></div>`).join('');
+  let txt=`分群目標：Low ≤ ${lowMax}、High ≥ ${highMin}；權重 Low/Mid/High = ${(rw[0]*100).toFixed(0)}/${(rw[1]*100).toFixed(0)}/${(rw[2]*100).toFixed(0)}%。 `;
+  txt+=`探索性 Grouped-array：R²=${grp.R2_LOOCV.toFixed(4)}、RMSE=${grp.RMSE.toFixed(3)}、MAE=${grp.MAE.toFixed(3)}；Low separation=${Number(grp.Low_adjacent_separation).toFixed(2)}、High separation=${Number(grp.High_adjacent_separation).toFixed(2)}。 `;
+  txt+=best.Model==='Grouped-array'?'<span class="besttext">目前分群配置為此批資料的最佳候選。</span>':`目前最佳仍是 <span class="besttext">${esc(best.Model)}</span>。`;
+  txt+=`<br><span class="warntext">注意：</span>Voltage 配置本身是用這批資料選出，再用同一批資料做 LOOCV，因此此處適合做設計篩選；最終論文準確度應用另一批獨立量測驗證。`;
+  $('#groupConclusion').className='model-result '+(best.Model==='Grouped-array'?'goodbox':'warnbox');$('#groupConclusion').innerHTML=txt;
+  tableFromRows($('#groupMetricTable'),metrics,100);
+  const scoreView=scoreRows.slice().sort((a,b)=>a.Sensor.localeCompare(b.Sensor)||a.Voltage-b.Voltage).map(r=>({
+    Sensor:r.Sensor,Voltage_V:r.Voltage,
+    Low_score:r.Low_score,Mid_score:r.Mid_score,High_score:r.High_score,Total_score:r.Total_score,
+    Low_dprime:r.Low_dprime,High_dprime:r.High_dprime,
+    Low_slope:r.Low_slope,High_slope:r.High_slope,
+    Low_monotonicity:r.Low_monotonicity,High_monotonicity:r.High_monotonicity
+  }));
+  tableFromRows($('#groupScoreTable'),scoreView,500);tableFromRows($('#groupAssignTable'),assignment,100);
+}
+
+
+function getEnabledRanges(){
+  const rows=[...document.querySelectorAll('#rangeConfigTable tbody tr')],out=[];
+  rows.forEach((tr,i)=>{
+    const en=tr.querySelector('.rangeEnable')?.checked;
+    const lo=Number(tr.querySelector('.rangeMin')?.value),hi=Number(tr.querySelector('.rangeMax')?.value);
+    if(en&&Number.isFinite(lo)&&Number.isFinite(hi)&&hi>=lo)out.push({name:`Group ${i+1}`,min:lo,max:hi});
+  });
+  return out;
+}
+function safeRangeLOOCV(X,y){
+  if(y.length<3)return {R2:NaN,RMSE:NaN,MAE:NaN,pred:[]};
+  if(new Set(y.map(v=>String(v))).size<3)return {R2:NaN,RMSE:NaN,MAE:NaN,pred:[]};
+  try{
+    const z=nestedLOOCV(X,y),m=modelMetrics(y,z.pred);
+    return {R2:m.R2,RMSE:m.RMSE,MAE:m.MAE,pred:z.pred};
+  }catch(e){return {R2:NaN,RMSE:NaN,MAE:NaN,pred:[]}}
+}
+function runConcentrationRangeGrouping(){
+  $('#groupStatus').textContent='計算中…';
+  setTimeout(()=>{
+    try{
+      const ds=collectModelDataset();
+      if(ds.error){$('#groupStatus').textContent=ds.error;$('#groupConclusion').className='model-result warnbox';$('#groupConclusion').textContent=ds.error;return}
+      const ranges=getEnabledRanges();
+      if(!ranges.length)throw new Error('至少啟用一個濃度群組。');
+      const {sensors,volts,samples}=ds;
+      const arrayRows=[],channelAll=[],channelBest=[];
+
+      for(const rg of ranges){
+        const sub=samples.filter(s=>s.conc>=rg.min&&s.conc<=rg.max);
+        const y=sub.map(s=>s.conc);
+        const uniq=[...new Set(y)].sort((a,b)=>a-b);
+
+        for(const v of volts){
+          const X=sub.map(s=>sensors.map(ch=>Number(s.byV[v][ch].log_response_ln)));
+          const m=safeRangeLOOCV(X,y);
+          arrayRows.push({Group:rg.name,Range:`${rg.min}–${rg.max}`,Voltage_Model:`${v} V`,Concentration_points:uniq.join(', '),N_samples:y.length,R2:m.R2,RMSE:m.RMSE,MAE:m.MAE,Feature_count:sensors.length});
+        }
+
+        const Xf=sub.map(s=>volts.flatMap(v=>sensors.map(ch=>Number(s.byV[v][ch].log_response_ln))));
+        const mf=safeRangeLOOCV(Xf,y);
+        arrayRows.push({Group:rg.name,Range:`${rg.min}–${rg.max}`,Voltage_Model:`${volts.length}-voltage fusion`,Concentration_points:uniq.join(', '),N_samples:y.length,R2:mf.R2,RMSE:mf.RMSE,MAE:mf.MAE,Feature_count:volts.length*sensors.length});
+
+        for(const ch of sensors){
+          const rows=[];
+          for(const v of volts){
+            const X=sub.map(s=>[Number(s.byV[v][ch].log_response_ln)]);
+            const m=safeRangeLOOCV(X,y);
+            const rr={Group:rg.name,Range:`${rg.min}–${rg.max}`,Sensor:ch,Voltage_V:v,N_samples:y.length,R2:m.R2,RMSE:m.RMSE,MAE:m.MAE};
+            channelAll.push(rr);rows.push(rr);
+          }
+          const valid=rows.filter(r=>Number.isFinite(r.RMSE)).sort((a,b)=>a.RMSE-b.RMSE || b.R2-a.R2 || a.MAE-b.MAE);
+          if(valid.length){
+            const b=valid[0];
+            channelBest.push({Group:rg.name,Range:`${rg.min}–${rg.max}`,Sensor:ch,Recommended_voltage_V:b.Voltage_V,R2:b.R2,RMSE:b.RMSE,MAE:b.MAE,N_samples:b.N_samples});
+          }else{
+            channelBest.push({Group:rg.name,Range:`${rg.min}–${rg.max}`,Sensor:ch,Recommended_voltage_V:'-',R2:NaN,RMSE:NaN,MAE:NaN,N_samples:y.length});
+          }
+        }
+      }
+
+      for(const rg of ranges){
+        const physical=arrayRows.filter(r=>r.Group===rg.name&&/ V$/.test(r.Voltage_Model)&&Number.isFinite(r.RMSE));
+        physical.sort((a,b)=>a.RMSE-b.RMSE || b.R2-a.R2 || a.MAE-b.MAE);
+        if(physical.length)physical[0].Best_physical_voltage='BEST';
+      }
+
+      state.groupScores=channelAll;
+      state.groupAssignment=channelBest;
+      state.groupLast={ranges,arrayRows,channelAll,channelBest,volts,sensors};
+
+      tableFromRows($('#groupMetricTable'),arrayRows,300);
+      tableFromRows($('#channelRangeBestTable'),channelBest,500);
+      tableFromRows($('#channelRangeAllTable'),channelAll,1000);
+
+      const summary=ranges.map(rg=>{
+        const p=arrayRows.find(r=>r.Group===rg.name&&r.Best_physical_voltage==='BEST');
+        return p?`${rg.name} (${rg.min}–${rg.max}) → <b>${esc(p.Voltage_Model)}</b> · R²=${Number(p.R2).toFixed(3)} · RMSE=${Number(p.RMSE).toFixed(3)} · MAE=${Number(p.MAE).toFixed(3)}`:`${rg.name}：資料不足`;
+      }).join('<br>');
+      $('#groupConclusion').className='model-result goodbox';
+      $('#groupConclusion').innerHTML=`<b>各濃度範圍最佳實體電壓（RMSE ↓）</b><br>${summary}<br><span class="hint">不使用權重、不使用綜合 Score。</span>`;
+      $('#groupStatus').textContent=`完成 · ${ranges.length} groups · ${sensors.length} channels`;refreshPredictionRangeSource();
+    }catch(e){
+      console.error(e);$('#groupStatus').textContent='計算失敗：'+e.message;
+      $('#groupConclusion').className='model-result warnbox';$('#groupConclusion').textContent='計算失敗：'+e.message;
+    }
+  },30);
+}
+
+
+function parsePredictionVoltages(){
+  const el=$('#predictionVoltages');
+  if(!el)throw new Error('找不到 A→P 通道電壓設定。');
+  const vals=String(el.value||'').split(',').map(x=>Number(x.trim()));
+  if(vals.length!==16||vals.some(v=>!Number.isFinite(v)||v<0))
+    throw new Error('A→P 必須輸入 16 個有效電壓；0 代表停用該通道。');
+  const out={};'ABCDEFGHIJKLMNOP'.split('').forEach((ch,i)=>out[ch]=vals[i]);return out;
+}
+function nearestTrainingFileForVoltage(v){
+  const exact=state.files.filter(f=>Number.isFinite(Number(f.defaultVoltage))&&Math.abs(Number(f.defaultVoltage)-v)<1e-6);
+  return exact[0]||null;
+}
+function predictionFeatureRows(f,winSec){
+  const sensors=getSensors(f),time=f.cols['Time(s)']?.map(Number)||[...Array(f.n)].map((_,i)=>i);
+  const dt=median(time.slice(1).map((x,i)=>x-time[i]).filter(x=>x>0))||1,nw=Math.max(2,Math.round(winSec/dt));
+  const rows=[];
+  f.waves.forEach((w,wi)=>{
+    const si=idxByTime(f,Number(w.start)),ei=idxByTime(f,Number(w.end)),obj={wave:wi+1,start_s:w.start,end_s:w.end};
+    sensors.forEach(ch=>{
+      const a=f.cols[ch].map(Number),R0=median(a.slice(Math.max(0,si-nw),si)),Rg=median(a.slice(Math.max(si,ei-nw),ei));
+      obj[ch]=(R0>0&&Rg>0)?Math.log(R0/Rg):NaN;
+    });
+    rows.push(obj);
+  });
+  return rows;
+}
+function buildMixedTrainingDataset(vmap){
+  const active='ABCDEFGHIJKLMNOP'.split('').filter(ch=>Number(vmap[ch])>0);
+  const channels=active.filter(ch=>{
+    const f=nearestTrainingFileForVoltage(vmap[ch]);return f&&f.headers.includes(ch)&&qcSensor(f.cols[ch].map(Number)).status==='ok';
+  });
+  const missing=active.filter(ch=>!nearestTrainingFileForVoltage(vmap[ch]));
+  if(missing.length)throw new Error(`缺少對應訓練電壓：${[...new Set(missing.map(ch=>vmap[ch]))].join(', ')} V。受影響通道：${missing.join(', ')}。0 V 通道已自動停用。`);
+  if(channels.length<2)throw new Error('可用的 Mixed-voltage 訓練通道不足。0 V 通道不會加入訓練。');
+
+  // Match training waves by wave index. Concentrations come from the corresponding training file wave labels.
+  const refFiles=[...new Set(channels.map(ch=>nearestTrainingFileForVoltage(vmap[ch])))];
+  const n=Math.min(...refFiles.map(f=>f.waves.length));
+  const X=[],y=[],usedWaves=[];
+  for(let wi=0;wi<n;wi++){
+    const vals=[],concs=[];
+    let ok=true;
+    for(const ch of channels){
+      const f=nearestTrainingFileForVoltage(vmap[ch]);
+      const r=state.features.find(z=>z.file===f.name&&z.wave===wi+1&&z.channel===ch);
+      const c=Number(f.waves[wi]?.conc);
+      if(!r||!Number.isFinite(Number(r.log_response_ln))||!Number.isFinite(c)){ok=false;break}
+      vals.push(Number(r.log_response_ln));concs.push(c);
+    }
+    if(ok&&Math.max(...concs)-Math.min(...concs)<1e-9){X.push(vals);y.push(concs[0]);usedWaves.push(wi+1)}
+  }
+  if(X.length<5)throw new Error(`可用訓練濃度點只有 ${X.length} 個；請確認訓練檔 Wave 濃度標註。`);
+  return {X,y,channels,usedWaves};
+}
+function selectPredictionAlpha(X,y){
+  const alphas=[];for(let i=0;i<41;i++)alphas.push(10**(-5+i*.25));
+  let bestA=alphas[0],best=Infinity;
+  for(const a of alphas){
+    const pred=[];
+    for(let i=0;i<y.length;i++){
+      const idx=[...Array(y.length).keys()].filter(j=>j!==i);
+      pred.push(ridgePredict(idx.map(j=>X[j]),idx.map(j=>y[j]),X[i],a));
+    }
+    const mse=mean(y.map((v,i)=>(v-pred[i])**2));
+    if(mse<best){best=mse;bestA=a}
+  }
+  return bestA;
+}
+function renderPredictionResult(rows,metrics,channels,alpha){
+  state.predictionRows=rows;state.predictionMetrics=metrics;
+  $('#predictionCards').innerHTML=[
+    {n:'R² ↑',v:metrics&&Number.isFinite(metrics.R2)?metrics.R2.toFixed(4):'—'},
+    {n:'RMSE ↓',v:metrics&&Number.isFinite(metrics.RMSE)?metrics.RMSE.toFixed(4)+' ppm':'—'},
+    {n:'MAE ↓',v:metrics&&Number.isFinite(metrics.MAE)?metrics.MAE.toFixed(4)+' ppm':'—'},
+    {n:'Prediction waves',v:String(rows.length)}
+  ].map(x=>`<div class="modelcard"><div class="name">${x.n}</div><div class="r2">${x.v}</div></div>`).join('');
+  tableFromRows($('#predictionTable'),rows,500);
+  $('#predictionStatus').className='model-result '+(metrics?'goodbox':'');
+  const excluded=state.predictionFile?('ABCDEFGHIJKLMNOP'.split('').filter(ch=>!channels.includes(ch))):[];
+  $('#predictionStatus').innerHTML=`通道：<b>${channels.join(', ')}</b>`+(excluded.length?`　｜　排除：<b>${excluded.join(', ')}</b>`:'')+
+    (metrics?`　｜　R²=${metrics.R2.toFixed(4)}　RMSE=${metrics.RMSE.toFixed(4)} ppm　MAE=${metrics.MAE.toFixed(4)} ppm`:``);
+}
+function runIndependentPrediction(){
+  try{
+    const pf=state.predictionFile;if(!pf)throw new Error('請先選擇 Prediction CSV。');
+    calcFeatures();
+    const vmap=parsePredictionVoltages(),train=buildMixedTrainingDataset(vmap),win=Math.max(3,Number($('#predictionWindow')?.value)||10);
+    const pr=predictionFeatureRows(pf,win);
+    if(!pr.length)throw new Error('Prediction 檔未偵測到 Wave。');
+
+    // Prediction 檔也必須做 QC。某些實體通道可能為 0 Ω / 未接 / 無效，
+    // 不能因為 training 端有效就強迫 prediction 使用該通道。
+    const usable=train.channels.filter(ch=>{
+      if(!pf.headers.includes(ch))return false;
+      const q=qcSensor(pf.cols[ch].map(Number));
+      if(q.status!=='ok')return false;
+      return pr.every(r=>Number.isFinite(Number(r[ch])));
+    });
+    const excluded=train.channels.filter(ch=>!usable.includes(ch));
+    if(usable.length<2)throw new Error(`Prediction 檔有效共同通道只有 ${usable.length} 個。`);
+
+    const keepIdx=usable.map(ch=>train.channels.indexOf(ch));
+    const trainX=train.X.map(row=>keepIdx.map(j=>row[j]));
+    const alpha=selectPredictionAlpha(trainX,train.y);
+
+    const actual=String($('#predictionActual')?.value||'').split(',').map(x=>x.trim()).filter(Boolean).map(Number);
+    if(actual.length&&actual.length!==pr.length)throw new Error(`真實濃度有 ${actual.length} 個，但 Prediction 檔偵測到 ${pr.length} 個 Wave。`);
+    const rows=[];
+    for(let i=0;i<pr.length;i++){
+      const xt=usable.map(ch=>Number(pr[i][ch]));
+      const pred=ridgePredict(trainX,train.y,xt,alpha);
+      rows.push({Wave:i+1,Start_s:pr[i].start_s,End_s:pr[i].end_s,Actual_ppm:actual.length?actual[i]:'',Predicted_ppm:pred,Error_ppm:actual.length?pred-actual[i]:''});
+    }
+    train.channels=usable;
+    train.excluded=excluded;
+    let metrics=null;
+    if(actual.length)metrics=modelMetrics(actual,rows.map(r=>r.Predicted_ppm));
+    renderPredictionResult(rows,metrics,train.channels,alpha);
+  }catch(e){
+    console.error(e);$('#predictionStatus').className='model-result warnbox';$('#predictionStatus').textContent='Prediction 失敗：'+e.message;
+  }
+}
+function availableValidationVoltages(){
+  const ds=collectModelDataset();
+  return ds.error?[]:ds.volts.slice();
+}
+
+function assignActualToValidationWaves(){
+  if(!state.predictionFiles?.length)return;
+  const raw=$('#predictionActual')?.value?.trim()||'';
+  if(!raw)return;
+  const parts=raw.split(';').map(x=>x.trim()).filter(Boolean);
+  let sets=[];
+  try{sets=parts.map(parseActualSequence)}catch(e){return}
+  state.predictionFiles.forEach((f,fi)=>{
+    const seq=sets.length===1?sets[0]:(sets.length===state.predictionFiles.length?sets[fi]:null);
+    if(seq&&seq.length===f.waves.length){
+      f.waves.forEach((w,i)=>{w.conc=seq[i];w.unit='ppm'});
+    }
+  });
+}
+function renderValidationWaveTable(){
+  const tb=$('#validationWaveTable tbody');if(!tb)return;
+  let html='',g=0;
+  (state.predictionFiles||[]).forEach((f,fi)=>f.waves.forEach((w,wi)=>{
+    g++;
+    html+=`<tr data-vfi="${fi}">
+      <td>${g}</td><td>${esc(f.name)}</td>
+      <td><input class="tiny vwstart" data-fi="${fi}" data-wi="${wi}" type="number" value="${w.start}"></td>
+      <td><input class="tiny vwend" data-fi="${fi}" data-wi="${wi}" type="number" value="${w.end}"></td>
+      <td><input class="small vwconc" data-fi="${fi}" data-wi="${wi}" value="${esc(w.conc??'')}"></td>
+      <td><select class="vwunit" data-fi="${fi}" data-wi="${wi}"><option ${w.unit==='ppm'?'selected':''}>ppm</option><option ${w.unit==='ppb'?'selected':''}>ppb</option><option ${w.unit==='%'?'selected':''}>%</option></select></td>
+      <td><button class="vwup" data-fi="${fi}" data-wi="${wi}" ${wi===0?'disabled':''}>↑</button> <button class="vwdown" data-fi="${fi}" data-wi="${wi}" ${wi===f.waves.length-1?'disabled':''}>↓</button></td>
+      <td><button class="danger vwdel" data-fi="${fi}" data-wi="${wi}">刪除</button></td>
+    </tr>`;
+  }));
+  tb.innerHTML=html||'<tr><td colspan="8" class="muted">載入 Validation 原始 CSV 後顯示 Wave。</td></tr>';
+
+  const bind=(cl,key)=>$$('.'+cl).forEach(x=>x.onchange=e=>{
+    const f=state.predictionFiles[+e.target.dataset.fi],w=f.waves[+e.target.dataset.wi];
+    w[key]=e.target.value;
+    if(state.selectedWaveSource==='validation'&&state.selectedValidationFile===+e.target.dataset.fi)drawChart();
+  });
+  bind('vwstart','start');bind('vwend','end');bind('vwconc','conc');bind('vwunit','unit');
+
+  $$('.vwup').forEach(x=>x.onclick=e=>{
+    const fi=+e.target.dataset.fi,wi=+e.target.dataset.wi,f=state.predictionFiles[fi];
+    if(wi>0){[f.waves[wi-1],f.waves[wi]]=[f.waves[wi],f.waves[wi-1]];renderValidationWaveTable();drawChart()}
+  });
+  $$('.vwdown').forEach(x=>x.onclick=e=>{
+    const fi=+e.target.dataset.fi,wi=+e.target.dataset.wi,f=state.predictionFiles[fi];
+    if(wi<f.waves.length-1){[f.waves[wi+1],f.waves[wi]]=[f.waves[wi],f.waves[wi+1]];renderValidationWaveTable();drawChart()}
+  });
+  $$('.vwdel').forEach(x=>x.onclick=e=>{
+    const fi=+e.target.dataset.fi,wi=+e.target.dataset.wi;
+    state.predictionFiles[fi].waves.splice(wi,1);renderValidationWaveTable();renderPredictionFileList();drawChart();
+  });
+}
+function scrollValidationWaveToSelectedFile(){
+  setActiveTab('predict');
+  const row=$(`#validationWaveTable tbody tr[data-vfi="${state.selectedValidationFile}"]`);
+  if(!row)return;
+  const sc=row.closest('.scroll');
+  if(sc)sc.scrollTo({top:Math.max(0,row.offsetTop-34),behavior:'smooth'});
+}
+
+function renderPredictionFileList(){
+  const el=$('#predictionFileList');if(!el)return;
+  el.innerHTML=state.predictionFiles.map((f,i)=>
+    `${i+1}. ${esc(f.name)} · ${f.waves.length} waves`
+  ).join('<br>');
+}
+async function loadPredictionFiles(fileList){
+  const loaded=[],failed=[];
+  for(const file of [...fileList]){
+    try{
+      const txt=await file.text(),dat=parseCSV(txt);
+      if(!dat.headers.includes('Time(s)'))throw new Error('缺少 Time(s) 欄位');
+      const iv=inferVoltage(file.name);
+      const f={
+        name:file.name,...dat,defaultVoltage:'mixed',defaultGas:inferGas(file.name),waves:[],
+        validationMode:'mixed'
+      };
+      f.waves=detectWaves(f);
+      loaded.push(f);
+    }catch(e){
+      failed.push(`${file.name}: ${e.message}`);
+    }
+  }
+  state.validationFeatureSets=[];state.predictionFiles=loaded;
+  state.predictionFile=loaded[0]||null;
+  state.selectedValidationFile=0;
+  assignActualToValidationWaves();
+  $('#predictionFileStatus').textContent=loaded.length?`已載入 ${loaded.length} 個 Validation CSV · 請確認 Wave 標註`:'尚未載入 Validation CSV';
+  renderPredictionFileList();renderValidationWaveTable();updateSelectors();
+  if(failed.length)$('#predictionFileList').insertAdjacentHTML('beforeend',`<div style="color:#ef8f8f;margin-top:5px">${esc(failed.join(' ｜ '))}</div>`);
+}
+function parseRangeText(v){
+  const m=String(v).trim().match(/^\s*(-?\d+(?:\.\d+)?)\s*[-~～–]\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if(!m)return null;const a=Number(m[1]),b=Number(m[2]);return Number.isFinite(a)&&Number.isFinite(b)&&b>=a?{min:a,max:b}:null;
+}
+
+function refreshPredictionRangeSource(){
+  const el=$('#predictionRangeSource');if(!el)return;
+  const ranges=getEnabledRanges();
+  el.innerHTML=ranges.length?'<br>目前使用：<b>'+esc(ranges.map(r=>`${r.name}: ${r.min}–${r.max} ppm`).join(' ｜ '))+'</b>':'<br><b>目前沒有啟用任何 Group</b>';
+}
+
+function refreshSingleVoltageOptions(){
+  const sel=$('#singleVoltageSelect');if(!sel)return;
+  const ds=collectModelDataset();if(ds.error)return;
+  const old=Number(sel.value);sel.innerHTML=ds.volts.map(v=>`<option value="${v}">${v} V</option>`).join('');
+  if(ds.volts.includes(old))sel.value=old;
+  else if(ds.volts.includes(2.4))sel.value=2.4;
+}
+function fitRidgeFull(X,y,alpha){
+  // ridgePredict already performs standardization internally from supplied training X.
+  return xt=>ridgePredict(X,y,xt,alpha);
+}
+function parseActualSequence(text){
+  const a=String(text).split(',').map(x=>x.trim()).filter(Boolean).map(Number);
+  if(!a.length||a.some(v=>!Number.isFinite(v)))throw new Error('真實濃度序列格式錯誤。');
+  return a;
+}
+function getPredictionActual(){
+  return parseActualSequence($('#predictionActual').value);
+}
+function getPredictionActualSets(files){
+  // Validation 原始 CSV：優先使用使用者在 Validation Wave 表中確認/修改後的濃度。
+  const fromWaves=files.map(f=>f.waves.map(w=>Number(w.conc)));
+  if(fromWaves.every(a=>a.length&&a.every(Number.isFinite)))return fromWaves;
+
+  // 若 Wave 濃度未完整設定，才退回上方真實濃度序列。
+  const raw=$('#predictionActual').value.trim();
+  if(!raw)throw new Error('請先輸入 Prediction 真實濃度序列，或在 Validation Wave 表填入濃度。');
+  const parts=raw.split(';').map(x=>x.trim()).filter(Boolean);
+  const sets=parts.map(parseActualSequence);
+  if(sets.length!==1 && sets.length!==files.length)throw new Error(`真實濃度需輸入 1 組共用序列，或 ${files.length} 組序列（以 ; 分隔）。`);
+  return files.map((f,i)=>{
+    const a=sets.length===1?sets[0]:sets[i];
+    if(a.length!==f.waves.length)throw new Error(`${f.name}：真實濃度 ${a.length} 點，但 Validation Wave 表有 ${f.waves.length} Waves。`);
+    return a.slice();
+  });
+}
+function singleVoltageBaseline(v){
+  const ds=collectModelDataset();if(ds.error)throw new Error(ds.error);
+  const {sensors,samples}=ds,y=samples.map(z=>z.conc);
+  if(!ds.volts.includes(v))throw new Error(`找不到 ${v} V training data`);
+  const X=samples.map(z=>sensors.map(ch=>Number(z.byV[v][ch].log_response_ln)));
+  const z=nestedLOOCV(X,y),m=modelMetrics(y,z.pred);
+  return {metrics:m,pred:z.pred,actual:y,n:samples.length,channels:sensors};
+}
+function mixedPredictionCore(groupRanges=null){
+  const pf=state.predictionFile;if(!pf)throw new Error('請先載入 Prediction CSV。');
+  calcFeatures();
+  const vmap=parsePredictionVoltages(),train=buildMixedTrainingDataset(vmap),win=Math.max(3,Number($('#predictionWindow')?.value)||10);
+  const pr=predictionFeatureRows(pf,win),actual=getPredictionActual();
+  if(actual.length!==pr.length)throw new Error(`真實濃度有 ${actual.length} 個，但 Prediction 檔有 ${pr.length} 個 Wave。`);
+
+  const usable=train.channels.filter(ch=>{
+    if(!pf.headers.includes(ch)||qcSensor(pf.cols[ch].map(Number)).status!=='ok')return false;
+    return pr.every(r=>Number.isFinite(Number(r[ch])));
+  });
+  if(usable.length<2)throw new Error('Mixed-voltage 有效共同通道不足。');
+  const idx=usable.map(ch=>train.channels.indexOf(ch));
+  const Xall=train.X.map(row=>idx.map(j=>row[j])),yall=train.y.slice();
+  const Xt=pr.map(r=>usable.map(ch=>Number(r[ch])));
+
+  if(!groupRanges){
+    const alpha=selectPredictionAlpha(Xall,yall),predict=fitRidgeFull(Xall,yall,alpha);
+    const pred=Xt.map(x=>predict(x));
+    return {actual,pred,metrics:modelMetrics(actual,pred),channels:usable};
+  }
+
+  const pred=new Array(actual.length).fill(NaN),details=[];
+  groupRanges.forEach((rg,gi)=>{
+    // Range membership for validation is based on known Actual concentration.
+    // This is a controlled evaluation of the range-specific models, not an unknown-sample routing algorithm.
+    const trIdx=yall.map((y,i)=>({y,i})).filter(z=>z.y>=rg.min&&z.y<=rg.max).map(z=>z.i);
+    const teIdx=actual.map((y,i)=>({y,i})).filter(z=>z.y>=rg.min&&z.y<=rg.max).map(z=>z.i);
+    if(trIdx.length<3||new Set(trIdx.map(i=>yall[i])).size<3){details.push(`${rg.name||('Group '+(gi+1))}: training points不足`);return}
+    const X=trIdx.map(i=>Xall[i]),y=trIdx.map(i=>yall[i]),alpha=selectPredictionAlpha(X,y),predict=fitRidgeFull(X,y,alpha);
+    teIdx.forEach(i=>pred[i]=predict(Xt[i]));
+    details.push(`${rg.name||('Group '+(gi+1))} ${rg.min}–${rg.max} ppm: train n=${trIdx.length}, validation n=${teIdx.length}`);
+  });
+  const keep=pred.map((p,i)=>({p,i})).filter(z=>Number.isFinite(z.p));
+  if(keep.length<3)throw new Error('分群後可計算的 Prediction 點不足。');
+  const aa=keep.map(z=>actual[z.i]),pp=keep.map(z=>z.p);
+  return {actual:aa,pred:pp,metrics:modelMetrics(aa,pp),channels:usable,details,covered:keep.length,total:actual.length};
+}
+
+
+
+function standardizeTrainTest(trainX,testX){
+  const p=trainX[0].length,mu=Array(p).fill(0),sd=Array(p).fill(1);
+  for(let j=0;j<p;j++){
+    mu[j]=mean(trainX.map(r=>r[j]));
+    const ss=Math.sqrt(mean(trainX.map(r=>(r[j]-mu[j])**2)));
+    sd[j]=Number.isFinite(ss)&&ss>1e-12?ss:1;
+  }
+  return {
+    train:trainX.map(r=>r.map((v,j)=>(v-mu[j])/sd[j])),
+    test:testX.map(r=>r.map((v,j)=>(v-mu[j])/sd[j]))
+  };
+}
+function rbfKernel(a,b,gamma){
+  let d=0;for(let j=0;j<a.length;j++){const q=a[j]-b[j];d+=q*q}
+  return Math.exp(-gamma*d);
+}
+function lsSvrPredictMany(trainX,y,testX,C,gamma){
+  const z=standardizeTrainTest(trainX,testX),X=z.train,Xt=z.test,n=X.length;
+  const A=Array.from({length:n+1},()=>Array(n+1).fill(0)),rhs=Array(n+1).fill(0);
+  for(let i=0;i<n;i++){A[0][i+1]=1;A[i+1][0]=1;rhs[i+1]=y[i]}
+  for(let i=0;i<n;i++)for(let j=0;j<n;j++)A[i+1][j+1]=rbfKernel(X[i],X[j],gamma)+(i===j?1/C:0);
+  const sol=solveLinear(A,rhs),b=sol[0],alpha=sol.slice(1);
+  return Xt.map(x=>b+alpha.reduce((sum,a,i)=>sum+a*rbfKernel(X[i],x,gamma),0));
+}
+function selectLsSvrParams(X,y){
+  const Cs=[0.1,1,10,100,1000],gammas=[0.01,0.03,0.05,0.1,0.2];
+  let best={C:1,gamma:0.05,rmse:Infinity};
+  for(const C of Cs)for(const gamma of gammas){
+    const pred=[];
+    for(let i=0;i<y.length;i++){
+      const ids=[...Array(y.length).keys()].filter(k=>k!==i);
+      pred.push(lsSvrPredictMany(ids.map(k=>X[k]),ids.map(k=>y[k]),[X[i]],C,gamma)[0]);
+    }
+    const m=modelMetrics(y,pred);
+    if(Number.isFinite(m.RMSE)&&m.RMSE<best.rmse)best={C,gamma,rmse:m.RMSE};
+  }
+  return best;
+}
+function seededRng(seed=123456789){
+  let x=seed>>>0;return ()=>{x=(1664525*x+1013904223)>>>0;return x/4294967296};
+}
+function rfMean(y,idx){return idx.length?idx.reduce((s,i)=>s+y[i],0)/idx.length:mean(y)}
+function rfSSE(y,idx){
+  if(!idx.length)return 0;const m=rfMean(y,idx);return idx.reduce((s,i)=>s+(y[i]-m)**2,0);
+}
+function buildRegressionTree(X,y,idx,depth,maxDepth,mtry,rng){
+  const value=rfMean(y,idx);
+  if(depth>=maxDepth||idx.length<=2||rfSSE(y,idx)<1e-12)return {leaf:true,value};
+  const p=X[0].length,features=[...Array(p).keys()];
+  for(let i=features.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[features[i],features[j]]=[features[j],features[i]]}
+  const use=features.slice(0,Math.max(1,Math.min(p,mtry)));
+  let best=null,bestLoss=Infinity;
+  for(const f of use){
+    const vals=[...new Set(idx.map(i=>X[i][f]))].sort((a,b)=>a-b);
+    if(vals.length<2)continue;
+    let th=vals.slice(0,-1).map((v,k)=>(v+vals[k+1])/2);
+    if(th.length>10)th=Array.from({length:10},(_,k)=>th[Math.min(th.length-1,Math.floor(k*(th.length-1)/9))]);
+    for(const t of th){
+      const left=idx.filter(i=>X[i][f]<=t),right=idx.filter(i=>X[i][f]>t);
+      if(!left.length||!right.length)continue;
+      const loss=rfSSE(y,left)+rfSSE(y,right);
+      if(loss<bestLoss){bestLoss=loss;best={f,t,left,right}}
+    }
+  }
+  if(!best)return {leaf:true,value};
+  return {leaf:false,value,f:best.f,t:best.t,
+    left:buildRegressionTree(X,y,best.left,depth+1,maxDepth,mtry,rng),
+    right:buildRegressionTree(X,y,best.right,depth+1,maxDepth,mtry,rng)};
+}
+function predictTree(tree,x){
+  let n=tree;while(!n.leaf)n=x[n.f]<=n.t?n.left:n.right;return n.value;
+}
+function randomForestPredictMany(trainX,y,testX,opts={}){
+  const trees=opts.trees||240,maxDepth=opts.maxDepth||5,mtry=opts.mtry||Math.max(1,Math.round(Math.sqrt(trainX[0].length))),rng=seededRng(opts.seed||20260909),n=trainX.length,forest=[];
+  for(let b=0;b<trees;b++){
+    const idx=Array.from({length:n},()=>Math.floor(rng()*n));
+    forest.push(buildRegressionTree(trainX,y,idx,0,maxDepth,mtry,rng));
+  }
+  return testX.map(x=>mean(forest.map(t=>predictTree(t,x))));
+}
+function prepareMixedAlgorithmData(pf=null,actualOverride=null){
+  pf=pf||state.predictionFile;
+  if(!pf)throw new Error('請先載入 Prediction CSV。');
+  calcFeatures();
+  const vmap=parsePredictionVoltages(),train=buildMixedTrainingDataset(vmap),win=Math.max(3,Number($('#predictionWindow')?.value)||10);
+  const pr=predictionFeatureRows(pf,win),actual=actualOverride||getPredictionActual();
+  if(actual.length!==pr.length)throw new Error(`${pf.name}：真實濃度 ${actual.length} 點，Prediction 為 ${pr.length} Waves。`);
+  const usable=train.channels.filter(ch=>pf.headers.includes(ch)&&qcSensor(pf.cols[ch].map(Number)).status==='ok'&&pr.every(r=>Number.isFinite(Number(r[ch]))));
+  if(usable.length<2)throw new Error(`${pf.name}：有效共同通道不足。`);
+  const idx=usable.map(ch=>train.channels.indexOf(ch));
+  return {
+    fileName:pf.name,
+    X:train.X.map(r=>idx.map(j=>r[j])),
+    y:train.y.slice(),
+    Xt:pr.map(r=>usable.map(ch=>Number(r[ch]))),
+    actual,
+    usable,
+    waveCount:pr.length
+  };
+}
+function runAlgorithmComparison(){
+  try{
+    $('#algorithmStatus').textContent='計算中…';
+    const d=prepareMixedAlgorithmData();
+
+    const alpha=selectPredictionAlpha(d.X,d.y);
+    const ridgePred=d.Xt.map(x=>ridgePredict(d.X,d.y,x,alpha));
+
+    const svp=selectLsSvrParams(d.X,d.y);
+    const svrPred=lsSvrPredictMany(d.X,d.y,d.Xt,svp.C,svp.gamma);
+
+    const rfPred=randomForestPredictMany(d.X,d.y,d.Xt,{trees:240,maxDepth:5,mtry:Math.max(1,Math.round(Math.sqrt(d.X[0].length))),seed:20260909});
+
+    const defs=[
+      {name:'Ridge',pred:ridgePred,param:`α=${alpha.toPrecision(4)}`},
+      {name:'LS-SVR (RBF)',pred:svrPred,param:`C=${svp.C}, γ=${svp.gamma}`},
+      {name:'Random Forest',pred:rfPred,param:'240 trees'}
+    ];
+    const rows=defs.map(z=>{const m=modelMetrics(d.actual,z.pred);return {Algorithm:z.name,R2:m.R2,RMSE_ppm:m.RMSE,MAE_ppm:m.MAE,Parameters:z.param,N:d.actual.length}});
+    rows.sort((a,b)=>a.RMSE_ppm-b.RMSE_ppm);
+    state.algorithmRows=rows;
+    state.algorithmPredictions=defs.flatMap(z=>z.pred.map((p,i)=>({Algorithm:z.name,Actual_ppm:d.actual[i],Predicted_ppm:p,Error_ppm:p-d.actual[i]})));
+    tableFromRows($('#algorithmTable'),rows,20);
+    drawAlgorithmChart($('#algorithmChart'),defs.map(z=>({name:z.name,x:d.actual,y:z.pred})));
+    setupAlgorithmChartEvents();
+    $('#algorithmStatus').textContent=`完成 · Best: ${rows[0].Algorithm}`;
+  }catch(e){
+    console.error(e);$('#algorithmStatus').textContent='失敗：'+e.message;
+  }
+}
+function drawAlgorithmChart(canvas,series){
+  const ctx=canvas.getContext('2d'),W=canvas.width,H=canvas.height,L=72,R=24,T=38,B=58;
+  const old=state.algorithmChartState,visible=old?.visible||Object.fromEntries(series.map(s=>[s.name,true]));
+  const active=series.filter(s=>visible[s.name]!==false);
+  if(!active.length)return;
+  const b=integerAutoBounds(active),xmin=b.xmin,xmax=b.xmax,ymin=b.ymin,ymax=b.ymax,sx=niceIntegerStep(xmax-xmin),sy=niceIntegerStep(ymax-ymin);
+  const PW=W-L-R,PH=H-T-B,X=v=>L+(v-xmin)/(xmax-xmin)*PW,Y=v=>T+(ymax-v)/(ymax-ymin)*PH;
+  ctx.clearRect(0,0,W,H);ctx.fillStyle='#ffffff';ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='#d9e2ec';ctx.fillStyle='#64748b';ctx.font='11px system-ui';
+  for(let v=Math.ceil(ymin/sy)*sy;v<=ymax;v+=sy){const yy=Y(v);ctx.beginPath();ctx.moveTo(L,yy);ctx.lineTo(W-R,yy);ctx.stroke();ctx.fillText(String(Math.round(v)),8,yy+4)}
+  for(let v=Math.ceil(xmin/sx)*sx;v<=xmax;v+=sx){const xx=X(v);ctx.beginPath();ctx.moveTo(xx,T);ctx.lineTo(xx,T+PH);ctx.stroke();ctx.fillText(String(Math.round(v)),xx-8,H-B+18)}
+  ctx.save();ctx.setLineDash([6,5]);ctx.strokeStyle='#94a3b8';ctx.beginPath();ctx.moveTo(X(Math.max(xmin,ymin)),Y(Math.max(xmin,ymin)));ctx.lineTo(X(Math.min(xmax,ymax)),Y(Math.min(xmax,ymax)));ctx.stroke();ctx.restore();
+  const colors=['#66d9b3','#f0b35a','#7aa7ff'],points=[];
+  active.forEach((sr,si)=>{
+    const c=colors[si%colors.length];ctx.strokeStyle=c;ctx.fillStyle=c;ctx.lineWidth=2;ctx.beginPath();
+    sr.x.forEach((x,i)=>{const px=X(x),py=Y(sr.y[i]);if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px,py)});ctx.stroke();
+    sr.x.forEach((x,i)=>{const y=sr.y[i],px=X(x),py=Y(y);ctx.beginPath();ctx.arc(px,py,4.2,0,Math.PI*2);ctx.fill();points.push({px,py,name:sr.name,x,y,error:y-x})});
+  });
+  ctx.fillStyle='#1f2937';ctx.font='13px system-ui';ctx.fillText('Ridge vs LS-SVR vs Random Forest',L,T-14);
+  ctx.fillStyle='#475569';ctx.font='12px system-ui';ctx.fillText('Actual concentration (ppm)',L+PW/2-68,H-12);
+  ctx.save();ctx.translate(16,T+PH/2+62);ctx.rotate(-Math.PI/2);ctx.fillText('Predicted concentration (ppm)',0,0);ctx.restore();
+  state.algorithmChartState={series,visible,points,canvas};
+  const leg=$('#algorithmLegend');
+  if(leg){
+    leg.innerHTML=series.map((sr,i)=>{const c=colors[i%colors.length],on=visible[sr.name]!==false;return `<button type="button" data-name="${esc(sr.name)}" style="margin:3px 6px 3px 0;padding:5px 9px;border-radius:999px;border:1px solid ${c};background:${on?c:'transparent'};color:${on?'#081018':c};cursor:pointer">${esc(sr.name)}</button>`}).join('');
+    leg.querySelectorAll('button').forEach(b=>b.onclick=()=>{visible[b.dataset.name]=visible[b.dataset.name]===false;state.algorithmChartState={series,visible};drawAlgorithmChart(canvas,series)});
+  }
+}
+function setupAlgorithmChartEvents(){
+  const canvas=$('#algorithmChart'),tip=$('#algorithmTooltip');if(!canvas||!tip)return;
+  canvas.onmousemove=e=>{
+    const st=state.algorithmChartState;if(!st?.points?.length)return;
+    const rect=canvas.getBoundingClientRect(),sx=canvas.width/rect.width,sy=canvas.height/rect.height,mx=(e.clientX-rect.left)*sx,my=(e.clientY-rect.top)*sy;
+    let best=null,bd=Infinity;for(const p of st.points){const d=Math.hypot(mx-p.px,my-p.py);if(d<bd){bd=d;best=p}}
+    if(best&&bd<14){tip.style.display='block';tip.innerHTML=`<b>${esc(best.name)}</b>`+(best.file?`<br>${esc(best.file)}`:'')+(best.wave?` · Wave ${best.wave}`:'')+`<br>Actual: ${best.x.toFixed(4)} ppm<br>Predicted: ${best.y.toFixed(4)} ppm<br>Error: ${best.error.toFixed(4)} ppm`;tip.style.left=Math.min(rect.width-190,(e.clientX-rect.left)+14)+'px';tip.style.top=Math.max(4,(e.clientY-rect.top)-18)+'px'}else tip.style.display='none';
+  };
+  canvas.onmouseleave=()=>tip.style.display='none';
+}
+
+
+function linearPredictMany(trainX,y,testX){
+  const n=trainX.length,p=trainX[0].length;
+  const A=Array.from({length:p+1},()=>Array(p+1).fill(0)),b=Array(p+1).fill(0);
+  for(let i=0;i<n;i++){
+    const row=[1,...trainX[i]];
+    for(let j=0;j<=p;j++){
+      b[j]+=row[j]*y[i];
+      for(let k=0;k<=p;k++)A[j][k]+=row[j]*row[k];
+    }
+  }
+  for(let j=0;j<=p;j++)A[j][j]+=1e-10;
+  const beta=solveLinear(A,b);
+  return testX.map(x=>beta[0]+x.reduce((sum,v,j)=>sum+v*beta[j+1],0));
+}
+function loocvFixedAlgorithm(X,y,algorithm){
+  const pred=[];
+  let param='';
+  if(algorithm==='Ridge'){
+    const z=nestedLOOCV(X,y);
+    return {pred:z.pred,param:'Nested Ridge'};
+  }
+  if(algorithm==='SVR'){
+    const p=selectLsSvrParams(X,y);param=`C=${p.C}, γ=${p.gamma}`;
+    for(let i=0;i<y.length;i++){
+      const ids=[...Array(y.length).keys()].filter(k=>k!==i);
+      pred.push(lsSvrPredictMany(ids.map(k=>X[k]),ids.map(k=>y[k]),[X[i]],p.C,p.gamma)[0]);
+    }
+    return {pred,param};
+  }
+  if(algorithm==='RF'){
+    param='160 trees';
+    for(let i=0;i<y.length;i++){
+      const ids=[...Array(y.length).keys()].filter(k=>k!==i);
+      pred.push(randomForestPredictMany(ids.map(k=>X[k]),ids.map(k=>y[k]),[X[i]],{
+        trees:160,maxDepth:5,mtry:Math.max(1,Math.round(Math.sqrt(X[0].length))),seed:20260909+i
+      })[0]);
+    }
+    return {pred,param};
+  }
+  for(let i=0;i<y.length;i++){
+    const ids=[...Array(y.length).keys()].filter(k=>k!==i);
+    pred.push(linearPredictMany(ids.map(k=>X[k]),ids.map(k=>y[k]),[X[i]])[0]);
+  }
+  return {pred,param:'OLS'};
+}
+function predictByAlgorithm(trainX,y,testX,algorithm){
+  if(algorithm==='Linear')return {pred:linearPredictMany(trainX,y,testX),param:'OLS'};
+  if(algorithm==='Ridge'){
+    const alpha=selectPredictionAlpha(trainX,y),fn=fitRidgeFull(trainX,y,alpha);
+    return {pred:testX.map(fn),param:`α=${alpha.toPrecision(4)}`};
+  }
+  if(algorithm==='SVR'){
+    const p=selectLsSvrParams(trainX,y);
+    return {pred:lsSvrPredictMany(trainX,y,testX,p.C,p.gamma),param:`C=${p.C}, γ=${p.gamma}`};
+  }
+  return {
+    pred:randomForestPredictMany(trainX,y,testX,{
+      trees:240,maxDepth:5,mtry:Math.max(1,Math.round(Math.sqrt(trainX[0].length))),seed:20260909
+    }),
+    param:'240 trees'
+  };
+}
+function uniqueRangeIndex(v,ranges){
+  const rr=ranges.slice().sort((a,b)=>a.min-b.min);
+  for(let i=0;i<rr.length;i++){
+    const last=i===rr.length-1;
+    if(v>=rr[i].min && (last?v<=rr[i].max:v<rr[i].max))return i;
+  }
+  return -1;
+}
+function groupedPredictByAlgorithm(d,ranges,algorithm){
+  const rr=ranges.slice().sort((a,b)=>a.min-b.min),pred=Array(d.actual.length).fill(NaN);
+  for(let gi=0;gi<rr.length;gi++){
+    const tr=[],te=[];
+    d.y.forEach((v,i)=>{if(uniqueRangeIndex(v,rr)===gi)tr.push(i)});
+    d.actual.forEach((v,i)=>{if(uniqueRangeIndex(v,rr)===gi)te.push(i)});
+    if(tr.length<3||new Set(tr.map(i=>d.y[i])).size<3)continue;
+    const fit=predictByAlgorithm(tr.map(i=>d.X[i]),tr.map(i=>d.y[i]),te.map(i=>d.Xt[i]),algorithm);
+    te.forEach((idx,k)=>pred[idx]=fit.pred[k]);
+  }
+  const keep=pred.map((v,i)=>({v,i})).filter(z=>Number.isFinite(z.v));
+  if(keep.length<3)throw new Error(`${algorithm} 分群後可預測點不足。`);
+  return {
+    actual:keep.map(z=>d.actual[z.i]),
+    pred:keep.map(z=>z.v),
+    indices:keep.map(z=>z.i),
+    covered:keep.length
+  };
+}
+function singleVoltageData(v){
+  const ds=collectModelDataset();
+  if(ds.error)throw new Error(ds.error);
+  if(!ds.volts.includes(v))throw new Error(`找不到 ${v} V training data`);
+  const X=ds.samples.map(z=>ds.sensors.map(ch=>Number(z.byV[v][ch].log_response_ln)));
+  return {X,y:ds.samples.map(z=>z.conc),sensors:ds.sensors};
+}
+function prepareSingleVoltagePredictionData(v,pf,actual){
+  const ds=collectModelDataset();
+  if(ds.error)throw new Error(ds.error);
+  if(!ds.volts.includes(v))throw new Error(`找不到 ${v} V training data`);
+  const win=Math.max(3,Number($('#predictionWindow')?.value)||10);
+  const pr=predictionFeatureRows(pf,win);
+  if(actual.length!==pr.length)throw new Error(`${pf.name}：真實濃度 ${actual.length} 點，Prediction 為 ${pr.length} Waves。`);
+  const usable=ds.sensors.filter(ch=>
+    pf.headers.includes(ch) &&
+    qcSensor(pf.cols[ch].map(Number)).status==='ok' &&
+    pr.every(r=>Number.isFinite(Number(r[ch]))) &&
+    ds.samples.every(z=>Number.isFinite(Number(z.byV[v]?.[ch]?.log_response_ln)))
+  );
+  if(usable.length<2)throw new Error(`${pf.name}：${v} V 有效共同通道不足。`);
+  return {
+    fileName:pf.name,
+    X:ds.samples.map(z=>usable.map(ch=>Number(z.byV[v][ch].log_response_ln))),
+    y:ds.samples.map(z=>z.conc),
+    Xt:pr.map(r=>usable.map(ch=>Number(r[ch]))),
+    actual:actual.slice(),
+    usable
+  };
+}
+
+
+function mergeFeatureSets(sets){
+  const merged=new Map();
+  for(const s of sets){
+    if(!merged.has(s.name))merged.set(s.name,{name:s.name,sourceName:s.sourceName,waves:[]});
+    const dst=merged.get(s.name),wm=new Map(dst.waves.map(w=>[w.wave,w]));
+    for(const w of s.waves){
+      if(!wm.has(w.wave)){
+        const nw={...w,values:{...w.values},voltages:{...(w.voltages||{})}};
+        dst.waves.push(nw);wm.set(w.wave,nw);
+      }else{
+        const z=wm.get(w.wave);
+        Object.assign(z.values,w.values);
+        Object.assign(z.voltages||(z.voltages={}),w.voltages||{});
+        if(Number.isFinite(w.actual))z.actual=w.actual;
+      }
+    }
+    dst.waves.sort((a,b)=>a.wave-b.wave);
+  }
+  return [...merged.values()];
+}
+async function loadTrainingFeatureFiles(fileList){
+  const sets=[],failed=[];
+  for(const file of [...fileList]){
+    try{
+      const txt=await file.text(),dat=parseCSV(txt);
+      sets.push(...parseValidationWaveFeatures(dat,file.name));
+    }catch(e){failed.push(`${file.name}: ${e.message}`)}
+  }
+  state.trainingFeatureSets=mergeFeatureSets(sets);
+  $('#trainingFeatureStatus').textContent=state.trainingFeatureSets.length?
+    `已匯入 ${state.trainingFeatureSets.length} 個訓練 feature dataset`:'尚未匯入訓練波';
+  $('#trainingFeatureList').innerHTML=state.trainingFeatureSets.map((s,i)=>
+    `${i+1}. ${esc(s.name)} · ${s.waves.length} waves`
+  ).join('<br>')+(failed.length?`<div style="color:#c94b4b;margin-top:5px">${esc(failed.join(' ｜ '))}</div>`:'');
+}
+async function loadPredictionFeatureFiles2(fileList){
+  const sets=[],failed=[];
+  for(const file of [...fileList]){
+    try{
+      const txt=await file.text(),dat=parseCSV(txt);
+      sets.push(...parseValidationWaveFeatures(dat,file.name));
+    }catch(e){failed.push(`${file.name}: ${e.message}`)}
+  }
+  state.validationFeatureSets=mergeFeatureSets(sets);
+  $('#predictionFeatureStatus2').textContent=state.validationFeatureSets.length?
+    `已匯入 ${state.validationFeatureSets.length} 個預測 feature dataset`:'尚未匯入預測波';
+  $('#predictionFeatureList2').innerHTML=state.validationFeatureSets.map((s,i)=>{
+    const known=s.waves.filter(w=>Number.isFinite(w.actual)).length;
+    let vtxt='';
+    try{
+      const vm=predictionVoltageMap(s);
+      vtxt=' · '+Object.entries(vm).map(([ch,v])=>`${ch}:${v}V`).join(' ');
+    }catch(e){}
+    return `${i+1}. ${esc(s.name)} · ${s.waves.length} waves · ${known} concentrations${vtxt}`;
+  }).join('<br>')+(failed.length?`<div style="color:#c94b4b;margin-top:5px">${esc(failed.join(' ｜ '))}</div>`:'');
+}
+
+function parseValidationWaveFeatures(dat,sourceName='wave_features.csv'){
+  const h=dat.headers;
+  const fileKey=['file','File','Data_File','data_file'].find(k=>h.includes(k));
+  const waveKey=['wave','Wave'].find(k=>h.includes(k));
+  const channelKey=['channel','Channel','Sensor'].find(k=>h.includes(k));
+  const concKey=['concentration','Concentration','Actual_ppm','actual_ppm'].find(k=>h.includes(k));
+  const voltageKey=['voltage_V','Voltage_V','voltage','Voltage'].find(k=>h.includes(k));
+  const logKey=['log_response_ln','Log_Response_Ln','log_response','ln_R0_Rgas'].find(k=>h.includes(k));
+  const r0Key=['R0','r0'].find(k=>h.includes(k));
+  const rgKey=['Rgas','Rgas_ohm','rgas'].find(k=>h.includes(k));
+
+  if(!waveKey||!channelKey)throw new Error(`${sourceName}：需要 wave、channel 欄位。`);
+  if(!logKey && !(r0Key&&rgKey))throw new Error(`${sourceName}：需要 log_response_ln，或至少 R0 + Rgas。`);
+
+  const grouped=new Map();
+  for(let i=0;i<dat.n;i++){
+    const file=String(fileKey?dat.cols[fileKey][i]:sourceName).trim()||sourceName;
+    const wave=Number(dat.cols[waveKey][i]);
+    const ch=String(dat.cols[channelKey][i]??'').trim().toUpperCase();
+    if(!Number.isFinite(wave)||!/^[A-P]$/.test(ch))continue;
+
+    let val=logKey?Number(dat.cols[logKey][i]):NaN;
+    if(!Number.isFinite(val)&&r0Key&&rgKey){
+      const r0=Number(dat.cols[r0Key][i]),rg=Number(dat.cols[rgKey][i]);
+      if(r0>0&&rg>0)val=Math.log(r0/rg);
+    }
+    if(!Number.isFinite(val))continue;
+
+    const key=file+'|'+wave;
+    if(!grouped.has(key))grouped.set(key,{
+      file,wave,actual:NaN,unit:'ppm',values:{},voltages:{}
+    });
+    const g=grouped.get(key);
+    g.values[ch]=val;
+    if(voltageKey){
+      const vv=Number(dat.cols[voltageKey][i]);
+      if(Number.isFinite(vv)&&vv>=0)g.voltages[ch]=vv;
+    }
+
+    if(concKey){
+      const c=Number(dat.cols[concKey][i]);
+      if(Number.isFinite(c))g.actual=c;
+    }
+  }
+
+  const byFile=new Map();
+  for(const g of grouped.values()){
+    if(!byFile.has(g.file))byFile.set(g.file,[]);
+    byFile.get(g.file).push(g);
+  }
+
+  const out=[];
+  for(const [file,waves] of byFile){
+    waves.sort((a,b)=>a.wave-b.wave);
+    out.push({name:file,sourceName,waves});
+  }
+  if(!out.length)throw new Error(`${sourceName}：沒有可用的 Wave feature rows。`);
+  return out;
+}
+async function loadValidationFeatureFiles(fileList){
+  const sets=[],failed=[];
+  for(const file of [...fileList]){
+    try{
+      const txt=await file.text(),dat=parseCSV(txt);
+      sets.push(...parseValidationWaveFeatures(dat,file.name));
+    }catch(e){failed.push(`${file.name}: ${e.message}`)}
+  }
+
+  // 同一 file 若分散於多個匯入 CSV，合併 wave/channel。
+  const merged=new Map();
+  for(const s of sets){
+    if(!merged.has(s.name))merged.set(s.name,{name:s.name,sourceName:s.sourceName,waves:[]});
+    const dst=merged.get(s.name),wm=new Map(dst.waves.map(w=>[w.wave,w]));
+    for(const w of s.waves){
+      if(!wm.has(w.wave)){const nw={...w,values:{...w.values}};dst.waves.push(nw);wm.set(w.wave,nw)}
+      else{
+        const z=wm.get(w.wave);Object.assign(z.values,w.values);
+        if(Number.isFinite(w.actual))z.actual=w.actual;
+      }
+    }
+    dst.waves.sort((a,b)=>a.wave-b.wave);
+  }
+
+  state.validationFeatureSets=[...merged.values()];renderValidationWaveTable();
+  // wave_features 模式與 raw Validation 模式互斥，避免不知道目前用哪一組。
+  state.predictionFiles=[];
+  state.predictionFile=null;
+
+  $('#predictionFileStatus').textContent=state.validationFeatureSets.length?
+    `已匯入 ${state.validationFeatureSets.length} 個 Validation feature dataset`:
+    '尚未載入 Validation 資料';
+
+  $('#predictionFileList').innerHTML=state.validationFeatureSets.map((s,i)=>{
+    const known=s.waves.filter(w=>Number.isFinite(w.actual)).length;
+    return `${i+1}. ${esc(s.name)} · ${s.waves.length} waves · ${known} concentrations · wave_features`;
+  }).join('<br>')+(failed.length?`<div style="color:#c94b4b;margin-top:5px">${esc(failed.join(' ｜ '))}</div>`:'');
+
+  $('#unifiedStatus').textContent=state.validationFeatureSets.length?
+    'Validation 模式：wave_features 直接驗證（不使用 Wave 標註）':'';
+}
+function featureSetActual(set){
+  const fromFeature=set.waves.map(w=>Number(w.actual));
+  if(!fromFeature.length||!fromFeature.every(Number.isFinite))
+    throw new Error(`${set.name}：預測波 wave_features.csv 的 concentration 欄位不完整。請先在 Wave 標註完成濃度後再匯出。`);
+  return fromFeature;
+}
+
+function featureSetChannelVoltageMap(set){
+  const out={};
+  for(const ch of 'ABCDEFGHIJKLMNOP'){
+    const vals=(set.waves||[])
+      .map(w=>Number(w.voltages?.[ch]))
+      .filter(Number.isFinite);
+    if(!vals.length)continue;
+    const uniq=[...new Set(vals.map(v=>Number(v.toFixed(6))))];
+    if(uniq.length>1)throw new Error(`${set.name}：通道 ${ch} 的 voltage_V 在不同 Wave 不一致：${uniq.join(', ')} V`);
+    out[ch]=uniq[0];
+  }
+  return out;
+}
+function featureSetMainVoltage(set){
+  const vm=featureSetChannelVoltageMap(set);
+  const vals=Object.values(vm).filter(v=>Number(v)>0);
+  if(vals.length){
+    const counts=new Map();
+    vals.forEach(v=>counts.set(v,(counts.get(v)||0)+1));
+    return [...counts.entries()].sort((a,b)=>b[1]-a[1])[0][0];
+  }
+  // 舊版 Training wave_features 若沒有 voltage_V，才退回檔名中的 2.7V / 3V 等資訊。
+  const m=String(set.name).match(/(\d+(?:\.\d+)?)\s*V/i);
+  return m?Number(m[1]):NaN;
+}
+
+function availableTrainingFeatureVoltages(){
+  return [...new Set((state.trainingFeatureSets||[])
+    .map(featureSetMainVoltage)
+    .map(Number)
+    .filter(v=>Number.isFinite(v)&&v>0))]
+    .sort((a,b)=>a-b);
+}
+function hasTrainingFeatureVoltage(v){
+  return availableTrainingFeatureVoltages().some(tv=>Math.abs(tv-Number(v))<1e-6);
+}
+function predictionVoltageMap(set){
+  const vm=featureSetChannelVoltageMap(set);
+  if(!Object.keys(vm).length)
+    throw new Error(`${set.name}：預測波 wave_features.csv 沒有 voltage_V，無法判斷各通道訓練電壓。`);
+  return vm;
+}
+function trainingFeatureDatasetForVoltage(v,predictionSet=null){
+  const sets=state.trainingFeatureSets||[];
+  const set=sets.find(s=>Math.abs(featureSetMainVoltage(s)-Number(v))<1e-6);
+  if(!set)throw new Error(`找不到 ${v} V 訓練波 wave_features CSV`);
+
+  const tvm=featureSetChannelVoltageMap(set);
+  const pvm=predictionSet?predictionVoltageMap(predictionSet):null;
+
+  // 訓練檔通常整份皆為同一電壓；若 training CSV 也帶逐通道 voltage_V，則一起核對。
+  const usable='ABCDEFGHIJKLMNOP'.split('').filter(ch=>{
+    const predOK=!pvm || Math.abs(Number(pvm[ch])-Number(v))<1e-6;
+    const trainV=tvm[ch];
+    const trainVOK=!Number.isFinite(trainV) || Math.abs(Number(trainV)-Number(v))<1e-6;
+    return predOK && trainVOK && set.waves.every(w=>Number.isFinite(Number(w.values[ch])));
+  });
+  if(!usable.length)throw new Error(`${set.name}：${v} V 沒有可用訓練通道。`);
+
+  const y=set.waves.map(w=>Number(w.actual));
+  if(!y.every(Number.isFinite))throw new Error(`${set.name}：訓練波 concentration 不完整。`);
+
+  return {
+    fileName:set.name,
+    X:set.waves.map(w=>usable.map(ch=>Number(w.values[ch]))),
+    y,
+    usable
+  };
+}
+function buildMixedTrainingFromPredictionSet(predSet){
+  const pvm=predictionVoltageMap(predSet);
+
+  // 0 V = 停用；Prediction 中沒有對應 Training voltage 的通道也自動略過。
+  const usable='ABCDEFGHIJKLMNOP'.split('').filter(ch=>{
+    const v=Number(pvm[ch]);
+    if(!(v>0))return false;
+    const set=(state.trainingFeatureSets||[]).find(s=>Math.abs(featureSetMainVoltage(s)-v)<1e-6);
+    if(!set)return false;
+    const tvm=featureSetChannelVoltageMap(set);
+    const trainV=tvm[ch];
+    return (!Number.isFinite(trainV)||Math.abs(trainV-v)<1e-6) &&
+      set.waves.every(w=>Number.isFinite(Number(w.values[ch]))) &&
+      predSet.waves.every(w=>Number.isFinite(Number(w.values[ch])));
+  });
+
+  if(usable.length<1)throw new Error(`${predSet.name}：沒有任何 Prediction 通道具有對應的訓練電壓。`);
+
+  const usedSets=[...new Set(usable.map(ch=>{
+    const v=Number(pvm[ch]);
+    return (state.trainingFeatureSets||[]).find(s=>Math.abs(featureSetMainVoltage(s)-v)<1e-6);
+  }))];
+  const n=Math.min(...usedSets.map(s=>s.waves.length));
+  const X=[],y=[];
+
+  for(let wi=0;wi<n;wi++){
+    const vals=[],concs=[];
+    let ok=true;
+    for(const ch of usable){
+      const v=Number(pvm[ch]);
+      const set=(state.trainingFeatureSets||[]).find(s=>Math.abs(featureSetMainVoltage(s)-v)<1e-6);
+      const w=set?.waves?.[wi],c=Number(w?.actual),x=Number(w?.values?.[ch]);
+      if(!Number.isFinite(c)||!Number.isFinite(x)){ok=false;break}
+      vals.push(x);concs.push(c);
+    }
+    if(ok && Math.max(...concs)-Math.min(...concs)<1e-9){
+      X.push(vals);y.push(concs[0]);
+    }
+  }
+  if(X.length<5)throw new Error(`${predSet.name}：Multi-Voltage 訓練有效濃度點只有 ${X.length} 個。`);
+  return {X,y,channels:usable,pvm};
+}
+
+function prepareMappedSingleVoltageFeatureData(v,set){
+  const pvm=predictionVoltageMap(set);
+  const mapped='ABCDEFGHIJKLMNOP'.split('').filter(ch=>Math.abs(Number(pvm[ch])-Number(v))<1e-6);
+  if(!mapped.length)throw new Error(`${set.name}：沒有 ${v} V Prediction 通道。`);
+
+  const tr=trainingFeatureDatasetForVoltage(v,set);
+  const usable=tr.usable.filter(ch=>
+    mapped.includes(ch) &&
+    set.waves.every(w=>Number.isFinite(Number(w.values[ch])))
+  );
+  if(!usable.length)throw new Error(`${set.name}：${v} V 沒有可用共同 feature 通道。`);
+
+  const trIdx=usable.map(ch=>tr.usable.indexOf(ch));
+  return {
+    fileName:set.name,voltage:v,
+    X:tr.X.map(r=>trIdx.map(j=>r[j])),
+    y:tr.y.slice(),
+    Xt:set.waves.map(w=>usable.map(ch=>Number(w.values[ch]))),
+    actual:featureSetActual(set),
+    usable,mapped
+  };
+}
+function prepareMixedFeatureData(set){
+  const train=buildMixedTrainingFromPredictionSet(set);
+  const usable=train.channels;
+  return {
+    fileName:set.name,
+    X:train.X,
+    y:train.y.slice(),
+    Xt:set.waves.map(w=>usable.map(ch=>Number(w.values[ch]))),
+    actual:featureSetActual(set),
+    usable,
+    waveCount:set.waves.length
+  };
+}
+function prepareMappedSingleVoltagePredictionData(v,pf,actual,vmap){
+  const trainFile=nearestTrainingFileForVoltage(v);
+  if(!trainFile)throw new Error(`找不到 ${v} V Training CSV`);
+  const win=Math.max(3,Number($('#predictionWindow')?.value)||10);
+  const pr=predictionFeatureRows(pf,win);
+  if(actual.length!==pr.length)throw new Error(`${pf.name}：真實濃度 ${actual.length} 點，但偵測到 ${pr.length} Waves。`);
+
+  // Validation channels are determined ONLY by the A→P voltage map.
+  const mapped='ABCDEFGHIJKLMNOP'.split('').filter(ch=>Math.abs(Number(vmap[ch])-Number(v))<1e-6);
+  const trainRows=predictionFeatureRows(trainFile,win);
+  const usable=mapped.filter(ch=>
+    trainFile.headers.includes(ch) && pf.headers.includes(ch) &&
+    qcSensor(trainFile.cols[ch].map(Number)).status==='ok' &&
+    qcSensor(pf.cols[ch].map(Number)).status==='ok' &&
+    trainRows.every(r=>Number.isFinite(Number(r[ch]))) &&
+    pr.every(r=>Number.isFinite(Number(r[ch])))
+  );
+  if(usable.length<1)throw new Error(`${pf.name}：${v} V 映射通道 ${mapped.join(',')||'無'} 中沒有可用共同通道。`);
+
+  const n=Math.min(trainRows.length,trainFile.waves.length);
+  const y=[];
+  for(let wi=0;wi<n;wi++){
+    const c=Number(trainFile.waves[wi].conc);
+    if(!Number.isFinite(c))throw new Error(`${trainFile.name}：Wave ${wi+1} 尚未設定 Training 濃度。`);
+    y.push(c);
+  }
+  return {
+    fileName:pf.name, voltage:v,
+    X:trainRows.slice(0,n).map(r=>usable.map(ch=>Number(r[ch]))),
+    y,
+    Xt:pr.map(r=>usable.map(ch=>Number(r[ch]))),
+    actual:actual.slice(),
+    usable,mapped
+  };
+}
+function runUnifiedComparison(){
+  try{
+    $('#unifiedStatus').textContent='計算中…';
+    const files=state.validationFeatureSets||[];
+    if(!(state.trainingFeatureSets||[]).length)throw new Error('請先匯入 1. 訓練波 wave_features CSV。');
+    if(!files.length)throw new Error('請先匯入 2. 預測波 wave_features CSV。');
+
+    const algorithms=['Linear','Ridge','SVR','RF'];
+    const rows=[],predRows=[],notes=[];
+    const predictionVolts=[...new Set(files.flatMap(set=>
+      Object.values(predictionVoltageMap(set)).map(Number).filter(v=>v>0)
+    ))].sort((a,b)=>a-b);
+    const trainingVolts=availableTrainingFeatureVoltages();
+    const volts=predictionVolts.filter(v=>trainingVolts.some(tv=>Math.abs(tv-v)<1e-6));
+    const skippedVolts=predictionVolts.filter(v=>!trainingVolts.some(tv=>Math.abs(tv-v)<1e-6));
+    if(skippedVolts.length)notes.push(`略過未提供訓練波的電壓：${skippedVolts.join(', ')} V`);
+    if(!volts.length)throw new Error(`Prediction 的電壓與 Training 無交集。Training：${trainingVolts.join(', ')||'無'} V；Prediction：${predictionVolts.join(', ')||'無'} V。`);
+
+    for(const v of volts){
+      const prepared=[];
+      for(const set of files){
+        try{prepared.push(prepareMappedSingleVoltageFeatureData(v,set))}
+        catch(e){notes.push(`${v} V / ${set.name}：${e.message}`)}
+      }
+      if(!prepared.length)continue;
+
+      for(const alg of algorithms){
+        const allA=[],allP=[];
+        for(const d of prepared){
+          const z=predictByAlgorithm(d.X,d.y,d.Xt,alg);
+          z.pred.forEach((p,k)=>{
+            allA.push(d.actual[k]);allP.push(p);
+            predRows.push({
+              Voltage_Method:`Single ${v} V`,Channels:d.usable.join(','),
+              Algorithm:alg,Evaluation:'Independent',
+              Method:`${v}V ${alg}`,Data_File:d.fileName,Wave:k+1,
+              Actual_ppm:d.actual[k],Predicted_ppm:p,Error_ppm:p-d.actual[k]
+            });
+          });
+        }
+        const m=modelMetrics(allA,allP),ch=[...new Set(prepared.flatMap(d=>d.usable))].join(',');
+        rows.push(appendRangeMetrics({
+          Voltage_Method:`Single ${v} V`,Channels:ch,Algorithm:alg,Evaluation:'Independent',
+          R2:m.R2,RMSE_ppm:m.RMSE,MAE_ppm:m.MAE,N:allA.length
+        },allA,allP));
+      }
+    }
+
+    const mixedData=[];
+    for(const set of files){
+      try{mixedData.push(prepareMixedFeatureData(set))}
+      catch(e){notes.push(`Multi-Voltage / ${set.name}：${e.message}`)}
+    }
+    if(mixedData.length){
+      for(const alg of algorithms){
+        const allA=[],allP=[];
+        for(const d of mixedData){
+          const z=predictByAlgorithm(d.X,d.y,d.Xt,alg);
+          z.pred.forEach((p,k)=>{
+            allA.push(d.actual[k]);allP.push(p);
+            predRows.push({
+              Voltage_Method:'Multi-Voltage',Channels:d.usable.join(','),
+              Algorithm:alg,Evaluation:'Independent',
+              Method:`Multi-V ${alg}`,Data_File:d.fileName,Wave:k+1,
+              Actual_ppm:d.actual[k],Predicted_ppm:p,Error_ppm:p-d.actual[k]
+            });
+          });
+        }
+        const m=modelMetrics(allA,allP);
+        rows.push(appendRangeMetrics({
+          Voltage_Method:'Multi-Voltage',Channels:[...new Set(mixedData.flatMap(d=>d.usable||[]))].join(','),
+          Algorithm:alg,Evaluation:'Independent',
+          R2:m.R2,RMSE_ppm:m.RMSE,MAE_ppm:m.MAE,N:allA.length
+        },allA,allP));
+      }
+    }
+
+    if(!rows.length)throw new Error('沒有可完成驗證的模型。請確認訓練波、預測波、A→P 電壓與 0 V 停用設定。');
+
+    const order=['Linear','Ridge','SVR','RF'];
+    rows.sort((x,y)=>{
+      const ox=x.Voltage_Method.startsWith('Single')?0:1,oy=y.Voltage_Method.startsWith('Single')?0:1;
+      if(ox!==oy)return ox-oy;
+      const vx=parseFloat(x.Voltage_Method.match(/[\d.]+/)?.[0]||999),vy=parseFloat(y.Voltage_Method.match(/[\d.]+/)?.[0]||999);
+      return vx!==vy?vx-vy:order.indexOf(x.Algorithm)-order.indexOf(y.Algorithm);
+    });
+
+    state.unifiedRows=rows;state.unifiedPredictions=predRows;
+    tableFromRows($('#unifiedTable'),rows,100);
+    $('#unifiedStatus').textContent=`完成 · ${rows.length} Methods · ${files.length} Prediction feature datasets`+
+      (notes.length?` · ${notes.join(' ｜ ')}`:'');
+  }catch(e){
+    console.error(e);$('#unifiedStatus').textContent='失敗：'+e.message;
+  }
+}
+function buildUnifiedExportRows(){
+  const out=[];
+  for(const r of state.unifiedRows)out.push({
+    Record_Type:'SUMMARY',Voltage_Method:r.Voltage_Method,Channels:r.Channels||'',
+    Algorithm:r.Algorithm,Evaluation:r.Evaluation,
+    R2:r.R2,RMSE_ppm:r.RMSE_ppm,MAE_ppm:r.MAE_ppm,N:r.N,
+
+    R2_0_2_to_2:r.R2_0_2_to_2,
+    RMSE_0_2_to_2_ppm:r.RMSE_0_2_to_2_ppm,
+    MAE_0_2_to_2_ppm:r.MAE_0_2_to_2_ppm,
+    N_0_2_to_2:r.N_0_2_to_2,
+
+    R2_2_to_20:r.R2_2_to_20,
+    RMSE_2_to_20_ppm:r.RMSE_2_to_20_ppm,
+    MAE_2_to_20_ppm:r.MAE_2_to_20_ppm,
+    N_2_to_20:r.N_2_to_20,
+
+    R2_20_to_200:r.R2_20_to_200,
+    RMSE_20_to_200_ppm:r.RMSE_20_to_200_ppm,
+    MAE_20_to_200_ppm:r.MAE_20_to_200_ppm,
+    N_20_to_200:r.N_20_to_200,
+
+    Data_File:'',Wave:'',Actual_ppm:'',Predicted_ppm:'',Error_ppm:''
+  });
+
+  for(const d of state.unifiedPredictions)out.push({
+    Record_Type:'DETAIL',Voltage_Method:d.Voltage_Method,Channels:d.Channels||'',
+    Algorithm:d.Algorithm,Evaluation:d.Evaluation,
+    R2:'',RMSE_ppm:'',MAE_ppm:'',N:'',
+
+    R2_0_2_to_2:'',RMSE_0_2_to_2_ppm:'',MAE_0_2_to_2_ppm:'',N_0_2_to_2:'',
+    R2_2_to_20:'',RMSE_2_to_20_ppm:'',MAE_2_to_20_ppm:'',N_2_to_20:'',
+    R2_20_to_200:'',RMSE_20_to_200_ppm:'',MAE_20_to_200_ppm:'',N_20_to_200:'',
+
+    Data_File:d.Data_File,Wave:d.Wave,Actual_ppm:d.Actual_ppm,
+    Predicted_ppm:d.Predicted_ppm,Error_ppm:d.Error_ppm
+  });
+  return out;
+}
+function niceIntegerStep(span,targetTicks=6){
+  if(!(span>0))return 1;
+  const rough=span/targetTicks,pow=10**Math.floor(Math.log10(rough)),n=rough/pow;
+  let step;
+  if(n<=1)step=1;else if(n<=2)step=2;else if(n<=5)step=5;else step=10;
+  return Math.max(1,Math.round(step*pow));
+}
+function integerAutoBounds(series){
+  const xs=series.flatMap(s=>s.x).filter(Number.isFinite),ys=series.flatMap(s=>s.y).filter(Number.isFinite);
+  if(!xs.length||!ys.length)return {xmin:0,xmax:1,ymin:0,ymax:1};
+  let xmin=Math.floor(Math.min(0,...xs)),xmax=Math.ceil(Math.max(...xs)),ymin=Math.floor(Math.min(0,...ys)),ymax=Math.ceil(Math.max(...ys));
+  if(xmin===xmax)xmax=xmin+1;if(ymin===ymax)ymax=ymin+1;
+  const sx=niceIntegerStep(xmax-xmin),sy=niceIntegerStep(ymax-ymin);
+  xmin=Math.floor(xmin/sx)*sx;xmax=Math.ceil(xmax/sx)*sx;
+  ymin=Math.floor(ymin/sy)*sy;ymax=Math.ceil(ymax/sy)*sy;
+  return {xmin,xmax,ymin,ymax};
+}
+function setAxisInputs(b){
+  const ids=[['chartXMin','xmin'],['chartXMax','xmax'],['chartYMin','ymin'],['chartYMax','ymax']];
+  ids.forEach(([id,k])=>{const el=$('#'+id);if(el)el.value=Math.round(b[k])});
+}
+function readAxisInputs(){
+  const b={xmin:Number($('#chartXMin')?.value),xmax:Number($('#chartXMax')?.value),ymin:Number($('#chartYMin')?.value),ymax:Number($('#chartYMax')?.value)};
+  if(!Object.values(b).every(Number.isFinite)||b.xmax<=b.xmin||b.ymax<=b.ymin)throw new Error('X/Y 軸範圍設定無效。');
+  return b;
+}
+function drawInteractiveValidationChart(canvas,series,title='Validation Method Comparison',boundsOverride=null){
+  const ctx=canvas.getContext('2d'),W=canvas.width,H=canvas.height,L=72,R=24,T=38,B=58;
+  const old=state.interactiveChartState;
+  const visible=old?.visible||Object.fromEntries(series.map(s=>[s.name,true]));
+  const active=series.filter(s=>visible[s.name]!==false);
+  if(!active.length){ctx.clearRect(0,0,W,H);return}
+
+  let bounds=boundsOverride||old?.bounds||integerAutoBounds(active);
+  let {xmin,xmax,ymin,ymax}=bounds;
+  const sx=niceIntegerStep(xmax-xmin),sy=niceIntegerStep(ymax-ymin);
+  // Keep manually adjusted bounds integer-based.
+  xmin=Math.floor(xmin);xmax=Math.ceil(xmax);ymin=Math.floor(ymin);ymax=Math.ceil(ymax);
+  if(xmax<=xmin)xmax=xmin+Math.max(1,sx);
+  if(ymax<=ymin)ymax=ymin+Math.max(1,sy);
+  bounds={xmin,xmax,ymin,ymax};
+  setAxisInputs(bounds);
+
+  const PW=W-L-R,PH=H-T-B,X=v=>L+(v-xmin)/(xmax-xmin)*PW,Y=v=>T+(ymax-v)/(ymax-ymin)*PH;
+  ctx.clearRect(0,0,W,H);ctx.fillStyle='#ffffff';ctx.fillRect(0,0,W,H);
+
+  ctx.strokeStyle='#d9e2ec';ctx.fillStyle='#64748b';ctx.font='11px system-ui';
+  for(let v=Math.ceil(ymin/sy)*sy;v<=ymax+1e-9;v+=sy){
+    const yy=Y(v);ctx.beginPath();ctx.moveTo(L,yy);ctx.lineTo(W-R,yy);ctx.stroke();ctx.fillText(String(Math.round(v)),8,yy+4);
+  }
+  for(let v=Math.ceil(xmin/sx)*sx;v<=xmax+1e-9;v+=sx){
+    const xx=X(v);ctx.beginPath();ctx.moveTo(xx,T);ctx.lineTo(xx,T+PH);ctx.stroke();ctx.fillText(String(Math.round(v)),xx-8,H-B+18);
+  }
+
+  ctx.save();ctx.setLineDash([6,5]);ctx.strokeStyle='#94a3b8';ctx.lineWidth=1.5;
+  const il0=Math.max(xmin,ymin),il1=Math.min(xmax,ymax);
+  if(il1>=il0){ctx.beginPath();ctx.moveTo(X(il0),Y(il0));ctx.lineTo(X(il1),Y(il1));ctx.stroke()}
+  ctx.restore();
+
+  const colors=['#66d9b3','#f0b35a','#7aa7ff','#d68cff','#ef7070','#8bd17c','#f27ca7','#9cd5e8'];
+  const points=[];
+  active.forEach((sr,si)=>{
+    const color=sr.color||colors[si%colors.length];
+    ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=2;ctx.beginPath();
+    let started=false;
+    sr.x.forEach((x,i)=>{
+      const y=sr.y[i];
+      if(!Number.isFinite(x)||!Number.isFinite(y)){started=false;return}
+      const px=X(x),py=Y(y);if(!started){ctx.moveTo(px,py);started=true}else ctx.lineTo(px,py);
+    });
+    ctx.stroke();
+    sr.x.forEach((x,i)=>{
+      const y=sr.y[i];if(!Number.isFinite(x)||!Number.isFinite(y))return;
+      if(x<xmin||x>xmax||y<ymin||y>ymax)return;
+      const px=X(x),py=Y(y);ctx.beginPath();ctx.arc(px,py,4.2,0,Math.PI*2);ctx.fill();
+      const md=sr.meta?.[i]||null;
+      points.push({px,py,name:sr.name,x,y,error:y-x,color,file:md?.file||'',wave:md?.wave||''});
+    });
+  });
+
+  ctx.fillStyle='#1f2937';ctx.font='13px system-ui';ctx.fillText(title,L,T-14);
+  ctx.fillStyle='#475569';ctx.font='12px system-ui';ctx.fillText('Actual concentration (ppm)',L+PW/2-68,H-12);
+  ctx.save();ctx.translate(16,T+PH/2+62);ctx.rotate(-Math.PI/2);ctx.fillText('Predicted concentration (ppm)',0,0);ctx.restore();
+
+  state.interactiveChartState={series,visible,points,canvas,bounds,plot:{L,R,T,B,W,H,PW,PH,X,Y}};
+
+  const legend=$('#interactiveLegend');
+  if(legend){
+    legend.innerHTML=series.map((sr,i)=>{
+      const c=sr.color||colors[i%colors.length],on=visible[sr.name]!==false;
+      return `<button type="button" class="legendToggle" data-name="${esc(sr.name)}" style="margin:3px 6px 3px 0;padding:5px 9px;border-radius:999px;border:1px solid ${c};background:${on?c:'transparent'};color:${on?'#081018':c};cursor:pointer">${esc(sr.name)}</button>`;
+    }).join('');
+    legend.querySelectorAll('.legendToggle').forEach(b=>b.onclick=()=>{
+      const n=b.dataset.name;state.interactiveChartState.visible[n]=state.interactiveChartState.visible[n]===false;
+      const vis=state.interactiveChartState.visible;
+      const ser=state.interactiveChartState.series;
+      state.interactiveChartState=null;
+      drawInteractiveValidationChart(canvas,ser,title,null);
+      state.interactiveChartState.visible=vis;
+      drawInteractiveValidationChart(canvas,ser,title,state.interactiveChartState.bounds);
+    });
+  }
+}
+function setupInteractiveValidationEvents(){
+  const canvas=$('#threeWayChart'),tip=$('#chartTooltip');if(!canvas||!tip)return;
+
+  canvas.onmousemove=e=>{
+    const st=state.interactiveChartState;if(!st)return;
+    if(st.dragging){
+      const rect=canvas.getBoundingClientRect(),sx=canvas.width/rect.width,sy=canvas.height/rect.height;
+      const mx=(e.clientX-rect.left)*sx,my=(e.clientY-rect.top)*sy;
+      const dx=mx-st.dragStart.mx,dy=my-st.dragStart.my,b0=st.dragStart.bounds,p=st.plot;
+      const xShift=-dx/p.PW*(b0.xmax-b0.xmin),yShift=dy/p.PH*(b0.ymax-b0.ymin);
+      const nb={xmin:Math.round(b0.xmin+xShift),xmax:Math.round(b0.xmax+xShift),ymin:Math.round(b0.ymin+yShift),ymax:Math.round(b0.ymax+yShift)};
+      drawInteractiveValidationChart(canvas,st.series,'All Validation Methods',nb);
+      const ns=state.interactiveChartState;ns.dragging=true;ns.dragStart=st.dragStart;
+      tip.style.display='none';return;
+    }
+    if(!st.points?.length)return;
+    const rect=canvas.getBoundingClientRect(),sx=canvas.width/rect.width,sy=canvas.height/rect.height;
+    const mx=(e.clientX-rect.left)*sx,my=(e.clientY-rect.top)*sy;
+    let best=null,bd=Infinity;
+    for(const p of st.points){const d=Math.hypot(mx-p.px,my-p.py);if(d<bd){bd=d;best=p}}
+    if(best&&bd<14){
+      tip.style.display='block';tip.innerHTML=`<b>${esc(best.name)}</b><br>Actual: ${best.x.toFixed(4)} ppm<br>Predicted: ${best.y.toFixed(4)} ppm<br>Error: ${best.error.toFixed(4)} ppm`;
+      tip.style.left=Math.min(rect.width-190,(e.clientX-rect.left)+14)+'px';tip.style.top=Math.max(4,(e.clientY-rect.top)-18)+'px';
+    }else tip.style.display='none';
+  };
+  canvas.onmousedown=e=>{
+    const st=state.interactiveChartState;if(!st)return;
+    const rect=canvas.getBoundingClientRect(),sx=canvas.width/rect.width,sy=canvas.height/rect.height;
+    st.dragging=true;st.dragStart={mx:(e.clientX-rect.left)*sx,my:(e.clientY-rect.top)*sy,bounds:{...st.bounds}};
+    canvas.style.cursor='grabbing';
+  };
+  window.addEventListener('mouseup',()=>{if(state.interactiveChartState)state.interactiveChartState.dragging=false;canvas.style.cursor='crosshair'});
+  canvas.onmouseleave=()=>{tip.style.display='none'};
+  canvas.onwheel=e=>{
+    e.preventDefault();
+    const st=state.interactiveChartState;if(!st)return;
+    const rect=canvas.getBoundingClientRect(),sx=canvas.width/rect.width,sy=canvas.height/rect.height;
+    const mx=(e.clientX-rect.left)*sx,my=(e.clientY-rect.top)*sy,p=st.plot,b=st.bounds;
+    const cx=b.xmin+(mx-p.L)/p.PW*(b.xmax-b.xmin),cy=b.ymax-(my-p.T)/p.PH*(b.ymax-b.ymin);
+    const factor=e.deltaY<0?0.82:1.22;
+    let nx0=cx-(cx-b.xmin)*factor,nx1=cx+(b.xmax-cx)*factor,ny0=cy-(cy-b.ymin)*factor,ny1=cy+(b.ymax-cy)*factor;
+    if(nx1-nx0<1){nx0=Math.floor(cx);nx1=nx0+1}
+    if(ny1-ny0<1){ny0=Math.floor(cy);ny1=ny0+1}
+    const nb={xmin:Math.floor(nx0),xmax:Math.ceil(nx1),ymin:Math.floor(ny0),ymax:Math.ceil(ny1)};
+    drawInteractiveValidationChart(canvas,st.series,'All Validation Methods',nb);
+  };
+  $('#applyChartAxis').onclick=()=>{try{const st=state.interactiveChartState;if(!st)return;drawInteractiveValidationChart(canvas,st.series,'All Validation Methods',readAxisInputs())}catch(err){alert(err.message)}};
+  $('#resetChartAxis').onclick=()=>{const st=state.interactiveChartState;if(!st)return;const active=st.series.filter(sr=>st.visible[sr.name]!==false);drawInteractiveValidationChart(canvas,st.series,'All Validation Methods',integerAutoBounds(active))};
+}
+function runThreeWayComparison(){
+  try{
+    const ds=collectModelDataset();if(ds.error)throw new Error(ds.error);
+    const ranges=getEnabledRanges().map(r=>({min:r.min,max:r.max,name:r.name}));
+    if(!ranges.length)throw new Error('「濃度範圍分群」Tab 尚未啟用任何 Group。');
+    const srcLabel=ranges.map(r=>`${r.name}: ${r.min}–${r.max} ppm`).join(' ｜ ');
+    const srcEl=$('#predictionRangeSource');if(srcEl)srcEl.innerHTML='<br>目前使用：<b>'+esc(srcLabel)+'</b>';
+
+    const rows=[],chartSeries=[];
+    // 1) Show every single-voltage baseline.
+    for(const v of ds.volts){
+      const one=singleVoltageBaseline(v);
+      rows.push({Method:`Single Voltage (${v} V)`,Evaluation:'Training LOOCV baseline',R2:one.metrics.R2,RMSE_ppm:one.metrics.RMSE,MAE_ppm:one.metrics.MAE,N:one.n});
+      chartSeries.push({name:`Single ${v} V`,x:one.actual,y:one.pred});
+    }
+
+    // 2) Mixed-voltage independent prediction.
+    const mix=mixedPredictionCore(null);
+    rows.push({Method:'3-Voltage Prediction',Evaluation:'Independent validation',R2:mix.metrics.R2,RMSE_ppm:mix.metrics.RMSE,MAE_ppm:mix.metrics.MAE,N:mix.actual.length});
+    chartSeries.push({name:'3-Voltage Prediction',x:mix.actual,y:mix.pred});
+
+    // 3) Mixed-voltage + concentration grouping.
+    const grp=mixedPredictionCore(ranges);
+    rows.push({Method:'3-Voltage + Grouping',Evaluation:'Independent validation · oracle range routing',R2:grp.metrics.R2,RMSE_ppm:grp.metrics.RMSE,MAE_ppm:grp.metrics.MAE,N:grp.covered});
+    chartSeries.push({name:'3-Voltage + Grouping',x:grp.actual,y:grp.pred});
+
+    state.threeWayRows=rows;
+    state.threeWayPredictions=[
+      ...mix.actual.map((a,i)=>({Method:'3-Voltage Prediction',Actual_ppm:a,Predicted_ppm:mix.pred[i]})),
+      ...grp.actual.map((a,i)=>({Method:'3-Voltage + Grouping',Actual_ppm:a,Predicted_ppm:grp.pred[i]}))
+    ];
+    tableFromRows($('#threeWayTable'),rows,50);
+    drawInteractiveValidationChart($('#threeWayChart'),chartSeries,'All Validation Methods');
+    setupInteractiveValidationEvents();
+
+    $('#threeWayStatus').textContent=`完成 · ${rows.length} methods`;
+    $('#threeWayNote').className='model-result goodbox';
+    $('#threeWayNote').innerHTML=`Grouping：${esc(srcLabel)}`;
+  }catch(e){
+    console.error(e);$('#threeWayStatus').textContent='失敗';$('#threeWayNote').className='model-result warnbox';$('#threeWayNote').textContent='Validation Method 比較失敗：'+e.message;
+  }
+}
+
+
+function normalizeWaveCSVFileName(name){
+  return String(name??'').trim().replace(/\\/g,'/').split('/').pop().trim().toLowerCase();
+}
+function rangesFromWaveCSVRows(rows){
+  const out=[],seen=new Set();
+  for(const r of rows){
+    const start=Number(r.start),end=Number(r.end);
+    if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start)continue;
+    let wave=Number(r.wave);
+    if(!Number.isFinite(wave))wave=out.length+1;
+    const key=String(wave);
+    if(seen.has(key))continue;
+    seen.add(key);
+    out.push({
+      wave,start,end,
+      conc:String(r.conc??''),
+      unit:String(r.unit??'ppm'),
+      gas:String(r.gas??''),
+      voltage:r.voltage??''
+    });
+  }
+  out.sort((a,b)=>a.wave-b.wave||a.start-b.start);
+  return out;
+}
+function importedWaveLookupFromCSV(dat){
+  const h=dat.headers;
+  const find=(...names)=>names.find(n=>h.includes(n));
+  const fileKey=find('file','File','filename','Filename','Data_File','data_file');
+  const recordKey=find('Record_Type','record_type');
+  const waveKey=find('wave','Wave','wave_no','Wave_No');
+  const startKey=find('start_s','Start_s','start','Start(s)','Start');
+  const endKey=find('end_s','End_s','end','End(s)','End');
+  const concKey=find('concentration','Concentration','conc','Conc.','Actual_ppm');
+  const unitKey=find('unit','Unit');
+  const gasKey=find('gas','Gas');
+  const voltageKey=find('voltage_V','Voltage_V','voltage','Voltage');
+
+  if(!fileKey)throw new Error('此 CSV 沒有 file 欄位，無法依檔名比對。請先使用新版「匯出 Multi-Voltage CSV」建立 Wave 資料庫。');
+  if(!startKey||!endKey)throw new Error('此 CSV 沒有 start_s / end_s，無法匯入 Wave 範圍。');
+
+  const grouped=new Map();
+  for(let i=0;i<dat.n;i++){
+    const rt=recordKey?String(dat.cols[recordKey][i]??'').trim():'';
+    // 新格式只讀 WAVE_DB；舊的 wave_features 沒有 Record_Type 也照樣接受。
+    if(rt && rt!=='WAVE_SETTING' && rt!=='WAVE_DB')continue;
+
+    const file=String(dat.cols[fileKey][i]??'').trim();
+    if(!file)continue;
+    const key=normalizeWaveCSVFileName(file);
+    if(!key)continue;
+    if(!grouped.has(key))grouped.set(key,{file,rows:[]});
+
+    grouped.get(key).rows.push({
+      wave:waveKey?dat.cols[waveKey][i]:'',
+      start:dat.cols[startKey][i],
+      end:dat.cols[endKey][i],
+      conc:concKey?dat.cols[concKey][i]:'',
+      unit:unitKey?dat.cols[unitKey][i]:'ppm',
+      gas:gasKey?dat.cols[gasKey][i]:'',
+      voltage:voltageKey?dat.cols[voltageKey][i]:''
+    });
+  }
+
+  const db=new Map();
+  for(const [key,g] of grouped){
+    const ranges=rangesFromWaveCSVRows(g.rows);
+    if(ranges.length)db.set(key,{file:g.file,ranges});
+  }
+  if(!db.size)throw new Error('找不到任何具有 file + start_s + end_s 的 Wave 資料。');
+  return db;
+}
+function applyWaveCSVRangesToFile(f,entry){
+  if(!f||!entry?.ranges?.length)return false;
+  const seq=concentrationSequence(),defaultUnit=$('#concUnit')?.value||'ppm';
+  const time=f.cols['Time(s)']?.map(Number)||[];
+  const tmin=time.length?Number(time[0]):0,tmax=time.length?Number(time.at(-1)):Math.max(1,f.n-1);
+
+  f.waves=entry.ranges.map((r,i)=>{
+    const start=clamp(Number(r.start),tmin,tmax),end=clamp(Number(r.end),tmin,tmax);
+    return {
+      startIdx:idxByTime(f,start),endIdx:idxByTime(f,end),start,end,
+      voltage:f.defaultVoltage,
+      gas:r.gas||f.defaultGas,
+      conc:r.conc!==''?r.conc:(seq[i]??''),
+      unit:r.unit||defaultUnit
+    };
+  }).filter(w=>Number(w.end)>Number(w.start));
+
+  return f.waves.length>0;
+}
+function applyWaveCSVToLoadedFiles(){
+  let matched=0;
+  for(const f of state.files){
+    const entry=state.waveCSVLookup.get(normalizeWaveCSVFileName(f.name));
+    if(entry&&applyWaveCSVRangesToFile(f,entry))matched++;
+  }
+  if(matched){
+    renderWaveTable();calcFeatures();renderFiles();resetWaveView();
+  }
+  return matched;
+}
+async function importMVWaveRanges(file){
+  const txt=await file.text(),dat=parseCSV(txt),incoming=importedWaveLookupFromCSV(dat);
+
+  // 以 CSV 對照表方式合併：相同檔名以新同名檔案以本次匯入內容覆蓋，其他檔名的匯入設定保留於本次頁面。
+  for(const [key,entry] of incoming)state.waveCSVLookup.set(key,entry);
+
+  const matched=applyWaveCSVToLoadedFiles();
+  const loadedNames=new Set(state.files.map(f=>normalizeWaveCSVFileName(f.name)));
+  const available=[...incoming.keys()].filter(k=>loadedNames.has(k)).length;
+
+  $('#chartStatus').textContent=
+    `Wave CSV：讀取 ${incoming.size} 個檔案設定 · 目前同名套用 ${matched} 個`+
+    (available!==incoming.size?` · 其餘 ${incoming.size-available} 個保留於本次匯入的 CSV 對照表，之後載入同名 CSV 會自動套用`:``);
+}
+function buildMultiVoltageWaveCSVRows(){
+  const rows=state.mv.map(r=>({Record_Type:'MV_FEATURE',...r}));
+
+  // 一般 CSV 快照：只匯出目前已載入檔案的 Wave 設定，不建立或維護外部資料庫。
+  for(const f of state.files){
+    f.waves.forEach((w,i)=>{
+      rows.push({
+        Record_Type:'WAVE_SETTING',
+        file:f.name,
+        wave:i+1,
+        start_s:Number(w.start),
+        end_s:Number(w.end),
+        voltage_V:f.defaultVoltage,
+        gas:w.gas||f.defaultGas||'',
+        concentration:w.conc??'',
+        unit:w.unit||'ppm'
+      });
+    });
+  }
+  return rows;
+}
+
+function refreshAll(){renderFiles();renderWaveTable();renderQC();updateSelectors();calcFeatures();setTimeout(renderPredictionFileList,0)}
+async function addFiles(fileList){
+  for(const file of fileList){try{
+    const txt=await file.text(),dat=parseCSV(txt);if(!dat.headers.includes('Time(s)'))throw new Error('缺少 Time(s) 欄位');
+    let f={name:file.name,...dat,defaultVoltage:inferVoltage(file.name),defaultGas:inferGas(file.name),waves:[]};
+    const dbEntry=state.waveCSVLookup.get(normalizeWaveCSVFileName(file.name));
+    if(dbEntry){
+      applyWaveCSVRangesToFile(f,dbEntry);
+    }else{
+      f.waves=detectWaves(f);
+    }
+    state.files.push(f)
+  }catch(e){alert(`${file.name}: ${e.message}`)}} refreshAll();
+}
+function toCSV(rows){if(!rows.length)return '';const keys=[...new Set(rows.flatMap(Object.keys))],q=v=>{let s=v==null?'':String(v);return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s};return '\uFEFF'+keys.map(q).join(',')+'\n'+rows.map(r=>keys.map(k=>q(r[k])).join(',')).join('\n')}
+function download(name,text,type='text/csv;charset=utf-8'){const b=new Blob([text],{type}),u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
+$('#drop').onclick=()=>$('#fileInput').click();$('#fileInput').onchange=e=>addFiles(e.target.files);$('#drop').ondragover=e=>{e.preventDefault();$('#drop').classList.add('drag')};$('#drop').ondragleave=()=>$('#drop').classList.remove('drag');$('#drop').ondrop=e=>{e.preventDefault();$('#drop').classList.remove('drag');addFiles(e.dataTransfer.files)};
+$('#addWave').onclick=()=>{
+  const f=state.files[state.selectedFile];
+  if(!f){alert('請先載入並選擇 CSV 檔案');return}
+  const time=f.cols['Time(s)']?.map(Number)||[...Array(f.n)].map((_,i)=>i);
+  const tmin=Number(time[0])||0,tmax=Number(time.at(-1))||Math.max(1,f.n-1);
+  let start,end;
+  if(Number.isFinite(waveView.xmin)&&Number.isFinite(waveView.xmax)){
+    const span=Math.max(2,waveView.xmax-waveView.xmin);start=waveView.xmin+span*.35;end=waveView.xmin+span*.65;
+  }else if(f.waves.length){
+    const last=f.waves[f.waves.length-1],dur=Math.max(10,Number(last.end)-Number(last.start));start=Number(last.end)+10;end=start+dur;
+  }else{start=tmin+(tmax-tmin)*.35;end=tmin+(tmax-tmin)*.55}
+  start=Math.max(tmin,Math.min(tmax-1,start));end=Math.max(start+1,Math.min(tmax,end));
+  const seq=($('#concSeq').value||'').split(',').map(x=>x.trim()).filter(Boolean);
+  const unit=$('#concUnit').value||'ppm';
+  const w={startIdx:idxByTime(f,start),endIdx:idxByTime(f,end),start:Number(start.toFixed(2)),end:Number(end.toFixed(2)),voltage:f.defaultVoltage,gas:f.defaultGas,conc:seq[f.waves.length]||'',unit};
+  f.waves.push(w);f.waves.sort((a,b)=>Number(a.start)-Number(b.start));
+  renderWaveTable();calcFeatures();renderFiles();
+ };
+$('#importMVWaveRanges').onclick=()=>$('#importMVWaveFile').click();
+$('#importMVWaveFile').onchange=async e=>{
+  const file=e.target.files?.[0];if(!file)return;
+  try{await importMVWaveRanges(file)}catch(err){alert('匯入 Wave 範圍失敗：'+err.message)}
+  e.target.value='';
+};
+$('#recalc').onclick=()=>{renderWaveTable();calcFeatures();if(state.modelLast)runModelComparison()};$('#applyConc').onclick=()=>{const seq=$('#concSeq').value.split(',').map(x=>x.trim()).filter(Boolean),unit=$('#concUnit').value;if(!seq.length)return;state.files.forEach(f=>f.waves.forEach((w,i)=>{if(i<seq.length){w.conc=seq[i];w.unit=unit}}));renderWaveTable();calcFeatures();runModelComparison();if(state.groupLast)runConcentrationRangeGrouping()};
+$('#chartFile').onchange=e=>{
+  const [kind,idxText]=String(e.target.value).split(':'),idx=Number(idxText);
+  if(kind==='v'){
+    state.selectedWaveSource='validation';state.selectedValidationFile=idx;state.predictionFile=state.predictionFiles[idx]||null;
+    updateSelectors();resetWaveView();requestAnimationFrame(scrollValidationWaveToSelectedFile);
+  }else{
+    state.selectedWaveSource='training';state.selectedFile=idx;
+    updateSelectors();renderWaveTable();resetWaveView();requestAnimationFrame(()=>syncWaveTableToSelectedFile(true));
+  }
+};$('#chartSensor').onchange=e=>{state.selectedSensor=e.target.value;resetWaveView()};$('#chartMode').onchange=drawChart;$('#yScale').onchange=drawChart;
+$('#exportFeat').onclick=()=>download('wave_features.csv',toCSV(state.features));$('#exportMV').onclick=()=>download('multi_voltage_features.csv',toCSV(buildMultiVoltageWaveCSVRows()));$('#exportPNG').onclick=()=>{const a=document.createElement('a');a.href=$('#chart').toDataURL('image/png');a.download='gas_wave_chart.png';a.click()};
+
+
+
+
+
+
+$('#pickTrainingFeatures').onclick=()=>$('#trainingFeatureFile').click();
+$('#trainingFeatureFile').onchange=e=>{if(e.target.files.length)loadTrainingFeatureFiles(e.target.files)};
+$('#pickPredictionFeatures').onclick=()=>$('#predictionFeatureFile2').click();
+$('#predictionFeatureFile2').onchange=e=>{if(e.target.files.length)loadPredictionFeatureFiles2(e.target.files)};
+$('#runUnifiedCompare').onclick=runUnifiedComparison;
+$('#exportUnifiedCompare').onclick=()=>download('all_model_comparison_with_details.csv',toCSV(buildUnifiedExportRows()));
+
+$('#runModelCompare').onclick=runModelComparison;$('#exportModelMetrics').onclick=()=>download('voltage_model_metrics.csv',toCSV(state.modelMetrics));$('#exportModelPred').onclick=()=>download('voltage_model_predictions.csv',toCSV(state.modelPredictions));$('#exportModelResp').onclick=()=>download('median_response_by_voltage.csv',toCSV(state.modelResponses));$('#exportRespPNG').onclick=()=>{const a=document.createElement('a');a.href=$('#responseChart').toDataURL('image/png');a.download='response_vs_concentration.png';a.click()};$('#exportPredPNG').onclick=()=>{const a=document.createElement('a');a.href=$('#predictionChart').toDataURL('image/png');a.download='actual_vs_predicted.png';a.click()};
+function initTabs(){
+  const names=['waves','predict'];
+  $$('.tab').forEach(b=>{
+    b.onclick=()=>{
+      setActiveTab(b.dataset.tab);
+    };
+  });
+}
+initTabs();
+bindWaveChartEvents();
+window.addEventListener('resize',drawChart);
+</script>
+
+</body></html>
