@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OMX Web Serial — 氣體感測量測</title>
+<title>氣體感測</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">OMX <span>Web Serial</span></div>
+  <div class="brand">OMX <span>氣體感測</span></div>
   <div class="conn-status" id="connStatus"><span class="dot"></span><span id="connText">未連線</span></div>
 </header>
 
@@ -28,24 +28,22 @@
         <input type="number" id="intervalInput" value="1" min="1" max="3600">
       </div>
       <div class="btn-row">
-        <button id="btnConnect" class="primary">連接 COM</button>
+        <button id="btnConnect" class="primary">連接</button>
         <button id="btnDisconnect" disabled>斷開</button>
       </div>
-      <div class="hint">僅 Chrome / Edge 支援 Web Serial。頁面需經 HTTPS 開啟。</div>
     </section>
 
     <section class="card">
-      <h2>資料分析工具</h2>
+      <h2>工具</h2>
       <div class="btn-row" style="flex-direction:column;align-items:stretch">
-        <a href="tools/log-response-ln/"><button style="width:100%">電壓－濃度統計分析</button></a>
-        <a href="tools/gas-wave-analyzer/"><button style="width:100%">Gas Wave Analyzer</button></a>
-        <a href="tools/ethanol-prediction/"><button style="width:100%">乙醇多電壓濃度預測</button></a>
+        <a href="tools/log-response-ln/"><button style="width:100%">濃度統計</button></a>
+        <a href="tools/gas-wave-analyzer/"><button style="width:100%">波形分析</button></a>
+        <a href="tools/ethanol-prediction/"><button style="width:100%">濃度預測</button></a>
       </div>
-      <div class="hint">各工具為獨立頁面，功能互不干擾。</div>
     </section>
 
     <section class="card">
-      <h2>ADC 校正</h2>
+      <h2>校正</h2>
       <div class="adc-grid">
         <label>ADC1 <input type="number" step="0.001" id="adc1" value="3.28"></label>
         <label>ADC2 <input type="number" step="0.001" id="adc2" value="3.27"></label>
@@ -53,23 +51,23 @@
         <label>ADC4 <input type="number" step="0.001" id="adc4" value="3.28"></label>
       </div>
       <div class="btn-row">
-        <button id="btnCalSend">送出校正</button>
+        <button id="btnCalSend">送出</button>
         <span id="calState" class="muted"></span>
       </div>
     </section>
 
     <section class="card">
-      <h2>量測控制</h2>
+      <h2>控制</h2>
       <div class="btn-row">
         <button id="btnMode" class="toggle">電阻模式</button>
-        <button id="btnR0">設置 Rair</button>
+        <button id="btnR0">設Rair</button>
       </div>
       <div class="btn-row">
-        <button id="btnRecStart">開始記錄</button>
-        <button id="btnRecStop" disabled>停止並下載</button>
+        <button id="btnRecStart">記錄</button>
+        <button id="btnRecStop" disabled>停止</button>
       </div>
       <div class="btn-row">
-        <button id="btnTimerStart">計時開始</button>
+        <button id="btnTimerStart">計時</button>
         <button id="btnTimerStop">停止</button>
         <button id="btnTimerReset">歸零</button>
       </div>
@@ -77,7 +75,7 @@
     </section>
 
     <section class="card">
-      <h2>通道判定規則</h2>
+      <h2>判定</h2>
       <div class="row">
         <label><input type="checkbox" id="ruleResEn"> 電阻啟用</label>
       </div>
@@ -97,7 +95,7 @@
     </section>
 
     <section class="card">
-      <h2>模組環境</h2>
+      <h2>環境</h2>
       <div class="env-grid">
         <div><span class="muted">溫度</span><strong id="modTemp">--</strong> ℃</div>
         <div><span class="muted">濕度</span><strong id="modHumd">--</strong> %</div>
@@ -109,7 +107,7 @@
   <main class="main">
     <section class="card chart-card">
       <div class="chart-head">
-        <h2 id="chartTitle">即時監控圖 — 電阻 (kΩ)</h2>
+        <h2 id="chartTitle">監控 — 電阻 (kΩ)</h2>
         <div class="legend" id="chartLegend"></div>
       </div>
       <canvas id="mainChart"></canvas>

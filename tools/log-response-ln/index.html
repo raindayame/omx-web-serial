@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>log_response_ln 電壓－濃度統計分析</title>
+<title>濃度統計</title>
 <style>
 :root{--bg:#f5f7fb;--card:#fff;--line:#d9e0ea;--text:#172033;--muted:#64748b;--accent:#2457d6;--ok:#087f5b}
 *{box-sizing:border-box} body{margin:0;font-family:"Segoe UI","Noto Sans TC",sans-serif;background:var(--bg);color:var(--text)}
@@ -54,8 +54,7 @@ tr.voltage-tint:hover td,tr.voltage-white:hover td{background:#e9f0f8}
 <body>
 <div class="wrap">
   <div class="head">
-    <div><h1>log_response_ln 電壓－濃度統計分析</h1>
-      <div class="sub">依 voltage_V × concentration 彙整 Q1、Q3、Mean，並計算 0.2–2、2–20、20–200 ppm 區域線性迴歸。</div>
+    <div><h1>濃度統計</h1>
     </div>
   </div>
 
@@ -93,7 +92,7 @@ tr.voltage-tint:hover td,tr.voltage-white:hover td{background:#e9f0f8}
   </div>
 
   <div class="card">
-    <h2>① 相同電壓 × 相同濃度：Q1 / Q3 / Mean</h2>
+    <h2>① 統計表</h2>
     <div class="tablewrap"><table>
       <thead><tr><th>Voltage (V)</th><th>Concentration (ppm)</th><th>N</th><th>Q1</th><th>Q3</th><th>Mean</th><th>Q3−Q1</th><th>Relative IQR (%)</th></tr></thead>
       <tbody id="statsBody"><tr><td colspan="8" style="text-align:center;color:#64748b">請先匯入 CSV</td></tr></tbody>
@@ -102,7 +101,7 @@ tr.voltage-tint:hover td,tr.voltage-white:hover td{background:#e9f0f8}
   </div>
 
   <div class="card">
-    <h2>② 區域濃度線性迴歸（相同 Voltage 的 Channels 合併；X = concentration；Y = Mean log_response_ln）</h2>
+    <h2>② 區域迴歸</h2>
     <div class="tablewrap"><table>
       <thead><tr><th>Voltage (V)</th><th>Channel</th><th>Range (ppm)</th><th>Points</th><th>Slope</th><th>Intercept</th><th>R²</th><th>Equation</th><th>Max Relative IQR (%)</th></tr></thead>
       <tbody id="regBody"><tr><td colspan="9" style="text-align:center;color:#64748b">請先匯入 CSV</td></tr></tbody>

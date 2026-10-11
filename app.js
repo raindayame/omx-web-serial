@@ -60,8 +60,8 @@ let mainChart, envChart;
 function initCharts() {
   mainChart = new LineChart($("mainChart"), { windowSec: 600 });
   envChart = new LineChart($("envChart"), { windowSec: 600 });
-  envChart.setSeries("temp", "#f87171");
-  envChart.setSeries("humd", "#38bdf8");
+  envChart.setSeries("temp", "#ff3b30");
+  envChart.setSeries("humd", "#0071e3");
 }
 
 /* ---------------- 序列埠 ---------------- */
@@ -145,7 +145,7 @@ function handleLine(line) {
     S.hasData = true;
     for (const ch of S.channels) {
       S.accum[ch] = []; S.dataBuf[ch] = []; S.sensBuf[ch] = [];
-      mainChart.setSeries(ch, "#94a3b8");
+      mainChart.setSeries(ch, "#8e8e93");
     }
     log(`自動偵測完成：${S.channels.length} 通道（${S.channels.join(",")}）。`);
     renderChannelGrid();
@@ -215,9 +215,9 @@ function judge(value) {
 
 function channelColor(value) {
   const r = activeRule();
-  if (!r.enabled) return "#94a3b8";
+  if (!r.enabled) return "#8e8e93";
   const c = LineChart.spectrumColor(value, r.min, r.max);
-  return c || "#475569";   // NO PASS -> 灰
+  return c || "#6e6e73";   // NO PASS -> 灰
 }
 
 function updateLiveUI(avg, sens, avgT, avgH, recordSec) {
@@ -351,10 +351,10 @@ function bindEvents() {
     const isSens = S.mode === "SENSITIVITY";
     $("btnMode").textContent = isSens ? "靈敏度模式" : "電阻模式";
     $("btnMode").classList.toggle("on", isSens);
-    $("chartTitle").textContent = isSens ? "即時監控圖 — 靈敏度 (R/R0)" : "即時監控圖 — 電阻 (kΩ)";
+    $("chartTitle").textContent = isSens ? "監控 — 靈敏度 (R/R0)" : "監控 — 電阻 (kΩ)";
     // 重建圖表序列以切換數值
     mainChart.clear();
-    for (const ch of S.channels) mainChart.setSeries(ch, "#94a3b8");
+    for (const ch of S.channels) mainChart.setSeries(ch, "#8e8e93");
     const n = S.timeBuf.length;
     for (let i = 0; i < n; i++) {
       const t = S.timeBuf[i];

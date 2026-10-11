@@ -64,10 +64,10 @@ class LineChart {
     const tMin = tMax - this.windowSec;
 
     // 背景與格線
-    ctx.fillStyle = "#0b1220";
+    ctx.fillStyle = "#ffffff";
     ctx.fillRect(this.padL, this.padT, pw, ph);
-    ctx.strokeStyle = "#1e293b"; ctx.lineWidth = 1;
-    ctx.fillStyle = "#64748b"; ctx.font = "11px Consolas, monospace";
+    ctx.strokeStyle = "#e8e8ed"; ctx.lineWidth = 1;
+    ctx.fillStyle = "#6e6e73"; ctx.font = "11px Consolas, monospace";
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
 
     if (!hasData) {
