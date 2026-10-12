@@ -284,7 +284,7 @@ function resetSession() {
   mainChart.clear(); envChart.clear();
   $("chGrid").innerHTML = "";
   $("chartInfo").textContent = "等待資料…";
-  if (S.recording) stopRecording(false);
+  if (S.recording) stopRecording(true);  /* 重連前先自動下載，避免未存檔的量測數據被靜默丟棄 */
 }
 
 /* ---------------- CSV 下載 ---------------- */
@@ -413,6 +413,7 @@ function bindEvents() {
   window.addEventListener("beforeunload", () => {
     if (S.recording && S.recResRows.length) {
       downloadCSV(`gas_resistance_${stamp()}.csv`, S.recResRows);
+      if (S.recSensRows.length) downloadCSV(`gas_senstivity_${stamp()}.csv`, S.recSensRows);
     }
   });
 }
