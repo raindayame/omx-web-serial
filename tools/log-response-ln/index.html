@@ -28,25 +28,17 @@ tr.voltage-tint:hover td,tr.voltage-white:hover td{background:#e9f0f8}
 .note{font-size:12px;color:var(--muted);line-height:1.7;margin-top:10px}
 .filelist{font-size:12px;color:var(--muted);margin-top:10px;max-height:90px;overflow:auto}
 .channelBox{
-  position:fixed;left:14px;top:50%;transform:translateY(-50%);
-  width:185px;max-height:72vh;overflow:auto;z-index:50;
   background:#fff;border:1px solid var(--line);border-radius:12px;
-  padding:12px;box-shadow:0 8px 28px #1720331f
+  padding:12px;margin:12px 0;box-shadow:0 2px 10px #1720330a;
 }
-.channelHead{display:block;margin-bottom:10px}
-.channelHead b{display:block;font-size:14px;margin-bottom:8px}
+.channelHead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.channelHead b{margin:0;font-size:14px}
 .channelActions{display:flex;gap:5px}.channelActions button{padding:6px 8px;font-size:11px;flex:1}
-.channelGrid{display:grid;grid-template-columns:1fr;gap:6px}
-.chip{display:flex;align-items:center;gap:7px;border:1px solid #ccd6e3;background:#fff;border-radius:8px;padding:7px 9px;cursor:pointer;user-select:none}
+.channelGrid{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:7px;border:1px solid #ccd6e3;background:#fff;border-radius:8px;padding:7px 9px;cursor:pointer;user-select:none}
 .chip:has(input:checked){background:#eef4ff;border-color:#8aa9ef;color:#173f9f}
 .chip input{margin:0}
 .channelBox .note{font-size:11px;line-height:1.45}
-@media(max-width:1180px){
-  .channelBox{position:sticky;left:auto;top:8px;transform:none;width:auto;max-height:none;overflow:visible;margin:12px 0;z-index:20}
-  .channelHead{display:flex;align-items:center;justify-content:space-between}
-  .channelHead b{margin:0}.channelGrid{display:flex;flex-wrap:wrap}
-  .chip{display:inline-flex}
-}
 @media(max-width:800px){.grid{grid-template-columns:1fr 1fr}.head{display:block}.status{width:100%;margin:0}}
 </style>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
@@ -79,7 +71,7 @@ tr.voltage-tint:hover td,tr.voltage-white:hover td{background:#e9f0f8}
       <div id="channelGrid" class="channelGrid"></div>
       <div class="note">勾選／取消後立即重新計算下方結果。</div>
     </div>
-    <div class="note">Excel 匯出：第 1 頁「原檔」保留匯入資料；第 2 頁「統計與迴歸」依序放置 Q1 / Q3 / Mean 與區域濃度線性迴歸。</div>
+    <div class="note">Excel 匯出：第 1 頁「原檔」保留匯入資料；第 2 頁「統計與迴歸」：統計表行=最高/最低/Q1/Q3、列=電壓，之後接區域濃度線性迴歸。</div>
   </div>
 
   <div class="card">
@@ -94,8 +86,8 @@ tr.voltage-tint:hover td,tr.voltage-white:hover td{background:#e9f0f8}
   <div class="card">
     <h2>① 統計表</h2>
     <div class="tablewrap"><table>
-      <thead><tr><th>Voltage (V)</th><th>Concentration (ppm)</th><th>N</th><th>Q1</th><th>Q3</th><th>Mean</th><th>Q3−Q1</th><th>Relative IQR (%)</th></tr></thead>
-      <tbody id="statsBody"><tr><td colspan="8" style="text-align:center;color:#64748b">請先匯入 CSV</td></tr></tbody>
+      <thead><tr><th>Voltage (V)</th><th>Concentration (ppm)</th><th>N</th><th>Q1</th><th>Q3</th><th>Mean</th><th>最高</th><th>最低</th><th>Q3−Q1</th><th>Relative IQR (%)</th></tr></thead>
+      <tbody id="statsBody"><tr><td colspan="10" style="text-align:center;color:#64748b">請先匯入 CSV</td></tr></tbody>
     </table></div>
     <div class="note">Q1、Q3 採線性插值百分位數（等同常見 INC 型百分位數）。Relative IQR (%) = (Q3−Q1) / |Mean| × 100%。NaN、空白及非有限的 log_response_ln 自動排除。</div>
   </div>
@@ -181,7 +173,8 @@ function analyze(){
   stats=[...groups.entries()].map(([k,a])=>{
     const [v,c]=k.split('|').map(Number);
     const q1=quantile(a,.25),q3=quantile(a,.75),mean=a.reduce((s,x)=>s+x,0)/a.length;
-    return {v,c,n:a.length,q1,q3,mean,iqr:q3-q1,relativeIQR:mean!==0?((q3-q1)/Math.abs(mean))*100:NaN};
+    const mx=Math.max(...a),mn=Math.min(...a);
+    return {v,c,n:a.length,q1,q3,mean,mx,mn,iqr:q3-q1,relativeIQR:mean!==0?((q3-q1)/Math.abs(mean))*100:NaN};
   }).sort((a,b)=>a.v-b.v||a.c-b.c);
 
   const ranges=[{label:'0.2–2',min:.2,max:2},{label:'2–20',min:2,max:20},{label:'20–200',min:20,max:200}];
@@ -214,9 +207,9 @@ function render(){
   const statVolts=[...new Set(stats.map(x=>x.v))];
   $('#statsBody').innerHTML=stats.length?stats.map(x=>{
     const cls=statVolts.indexOf(x.v)%2===0?'voltage-tint':'voltage-white';
-    return `<tr class="${cls}"><td>${x.v}</td><td>${x.c}</td><td>${x.n}</td><td>${fmt(x.q1,6)}</td><td>${fmt(x.q3,6)}</td><td>${fmt(x.mean,6)}</td><td>${fmt(x.iqr,6)}</td><td>${fmt(x.relativeIQR,2)}%</td></tr>`;
+    return `<tr class="${cls}"><td>${x.v}</td><td>${x.c}</td><td>${x.n}</td><td>${fmt(x.q1,6)}</td><td>${fmt(x.q3,6)}</td><td>${fmt(x.mean,6)}</td><td>${fmt(x.mx,6)}</td><td>${fmt(x.mn,6)}</td><td>${fmt(x.iqr,6)}</td><td>${fmt(x.relativeIQR,2)}%</td></tr>`;
   }).join(''):
-    '<tr><td colspan="8" style="text-align:center">無有效資料</td></tr>';
+    '<tr><td colspan="10" style="text-align:center">無有效資料</td></tr>';
   const regVolts=[...new Set(regressions.map(x=>x.v))];
   $('#regBody').innerHTML=regressions.length?regressions.map(x=>{
     const cls=regVolts.indexOf(x.v)%2===0?'voltage-tint':'voltage-white';
@@ -277,18 +270,19 @@ function exportXlsx(){
   const aoa=[
     ['計算使用 Channel', [...selectedChannels].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).join(', ')],
     [],
-    ['Q1 / Q3 / Mean'],
-    ['Voltage (V)','Concentration (ppm)','N','Q1','Q3','Mean','Q3−Q1','Relative IQR (%)'],
-    ...stats.map(x=>[x.v,x.c,x.n,x.q1,x.q3,x.mean,x.iqr,x.relativeIQR]),
+    ['統計量 / 電壓(V)'],
+    ['項目',...stats.map(x=>x.v)],
+    ['最高',...stats.map(x=>x.mx)],
+    ['最低',...stats.map(x=>x.mn)],
+    ['Q1',...stats.map(x=>x.q1)],
+    ['Q3',...stats.map(x=>x.q3)],
     [],
     ['區域濃度線性迴歸'],
     ['Voltage (V)','Channel','Range (ppm)','Points','Slope','Intercept','R²','Equation','Max Relative IQR (%)'],
     ...regressions.map(x=>[x.v,x.ch,x.range,x.n,x.slope,x.intercept,x.r2,x.eq,x.maxRelativeIQR])
   ];
   const ws=XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols']=[
-    {wch:13},{wch:20},{wch:14},{wch:14},{wch:14},{wch:14},{wch:18},{wch:24},{wch:24}
-  ];
+  ws['!cols']=[{wch:14},...stats.map(()=>({wch:16}))];
   XLSX.utils.book_append_sheet(wb,ws,'統計與迴歸');
 
   const stamp=new Date();
