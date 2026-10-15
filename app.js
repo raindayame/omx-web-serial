@@ -44,6 +44,7 @@ const S = {
   csvRows: [], recording: false, recResRows: [], recSensRows: [],
   timerSec: 0, timerRunning: false,
   chPage: 0,
+  dirHandle: null, segMs: 0, segStart: 0, segBusy: false,
   adc: [3.28, 3.27, 3.27, 3.28],
   rules: {
     resistance: { enabled: false, min: 0, max: 1000 },
@@ -60,28 +61,50 @@ let mainChart, envChart;
 function initCharts() {
   mainChart = new LineChart($("mainChart"), { windowSec: 600 });
   envChart = new LineChart($("envChart"), { windowSec: 600 });
-  envChart.setSeries("temp", "#ff3b30");
-  envChart.setSeries("humd", "#0071e3");
+  envChart.setSeries("temp", "#f87171");
+  envChart.setSeries("humd", "#38bdf8");
 }
 
 /* ---------------- 序列埠 ---------------- */
+async function openPort(port, baudRate) {
+  await port.open({ baudRate });
+  S.port = port;
+  S.writer = port.writable.getWriter();
+  resetSession();
+  S.connected = true;
+  S.keepReading = true;
+  updateConnUI();
+  readLoop();
+}
+
 async function connectSerial() {
   if (!("serial" in navigator)) {
     log("此瀏覽器不支援 Web Serial，請改用 Chrome / Edge。");
     return;
   }
+  const baudRate = parseInt($("baudSel").value, 10);
   try {
+    // 1) 重用上次的 port（斷開後未拔線）：直接重開，不再跳選擇器
+    if (S.port) {
+      try {
+        await openPort(S.port, baudRate);
+        log(`已重新連接（${baudRate} baud），等待硬體資料…`);
+        return;
+      } catch (e) {
+        S.port = null; // 裝置可能已拔除，改走選擇器
+      }
+    }
+    // 2) 取回已配對過的 port
+    const ports = await navigator.serial.getPorts();
+    if (ports.length) {
+      await openPort(ports[0], baudRate);
+      log(`已連接已配對裝置（${baudRate} baud），等待硬體資料…`);
+      return;
+    }
+    // 3) 首次使用：跳出選擇器
     const port = await navigator.serial.requestPort();
-    const baudRate = parseInt($("baudSel").value, 10);
-    await port.open({ baudRate });
-    S.port = port;
-    S.writer = port.writable.getWriter();
-    resetSession();
-    S.connected = true;
-    S.keepReading = true;
-    updateConnUI();
+    await openPort(port, baudRate);
     log(`已連接 COM（${baudRate} baud），等待硬體資料以進行通道自適應偵測…`);
-    readLoop();
   } catch (e) {
     if (e.name !== "NotFoundError") log(`連線失敗：${e.message}`);
   }
@@ -92,10 +115,20 @@ async function disconnectSerial() {
   try { if (S.reader) await S.reader.cancel(); } catch {}
   try { if (S.writer) { S.writer.releaseLock(); } } catch {}
   try { if (S.port) await S.port.close(); } catch {}
-  S.port = null; S.reader = null; S.writer = null;
+  // 保留 S.port：下次按連接可直接重開，不用再選一次
+  S.reader = null; S.writer = null;
   S.connected = false;
   updateConnUI();
-  log("已斷開連線。");
+  log("已斷開連線。再次按下「連接 COM」可直接重連。");
+}
+
+async function forgetDevice() {
+  try {
+    const port = S.port || (await navigator.serial.getPorts())[0];
+    if (port) { try { await port.forget(); } catch {} }
+  } catch {}
+  S.port = null;
+  log("已忘記裝置，下次連接會重新跳出選擇器。");
 }
 
 async function readLoop() {
@@ -145,7 +178,7 @@ function handleLine(line) {
     S.hasData = true;
     for (const ch of S.channels) {
       S.accum[ch] = []; S.dataBuf[ch] = []; S.sensBuf[ch] = [];
-      mainChart.setSeries(ch, "#8e8e93");
+      mainChart.setSeries(ch, "#94a3b8");
     }
     log(`自動偵測完成：${S.channels.length} 通道（${S.channels.join(",")}）。`);
     renderChannelGrid();
@@ -215,9 +248,9 @@ function judge(value) {
 
 function channelColor(value) {
   const r = activeRule();
-  if (!r.enabled) return "#8e8e93";
+  if (!r.enabled) return "#94a3b8";
   const c = LineChart.spectrumColor(value, r.min, r.max);
-  return c || "#6e6e73";   // NO PASS -> 灰
+  return c || "#475569";   // NO PASS -> 灰
 }
 
 function updateLiveUI(avg, sens, avgT, avgH, recordSec) {
@@ -280,19 +313,22 @@ function resetSession() {
     accum: {}, tempAcc: [], humdAcc: [],
     timeBuf: [], dataBuf: {}, sensBuf: {}, tempBuf: [], humdBuf: [],
     r0: {}, hasR0: false, csvRows: [], lineBuf: "",
+    segStart: performance.now(),
   });
   mainChart.clear(); envChart.clear();
   $("chGrid").innerHTML = "";
   $("chartInfo").textContent = "等待資料…";
-  if (S.recording) stopRecording(true);  /* 重連前先自動下載，避免未存檔的量測數據被靜默丟棄 */
+  if (S.recording) stopRecording(false);
 }
 
-/* ---------------- CSV 下載 ---------------- */
-function downloadCSV(filename, rows) {
+/* ---------------- CSV 下載 / 分段存檔 ---------------- */
+function buildCSVText(rows) {
   const header = ["Time(s)", ...S.channels, "TEMP", "HUMD"];
-  const text = "\uFEFF" + [header, ...rows].map((r) => r.join(",")).join("\r\n");
+  return "\uFEFF" + [header, ...rows].map((r) => r.join(",")).join("\r\n");
+}
+function downloadCSV(filename, rows) {
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+  a.href = URL.createObjectURL(new Blob([buildCSVText(rows)], { type: "text/csv;charset=utf-8" }));
   a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
@@ -300,6 +336,37 @@ function downloadCSV(filename, rows) {
 function stamp() {
   const d = new Date(), p = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+// 自動分段：時間到就把 csvRows 寫成一段新檔並清空記憶體
+async function flushSegment() {
+  if (S.segBusy || !S.csvRows.length || !S.hasData) return;
+  S.segBusy = true;
+  try {
+    const filename = `omx_${stamp()}.csv`;
+    const text = buildCSVText(S.csvRows);
+    const n = S.csvRows.length;
+    if (S.dirHandle) {
+      const fh = await S.dirHandle.getFileHandle(filename, { create: true });
+      const w = await fh.createWritable();
+      await w.write(text);
+      await w.close();
+      log(`分段存檔：${filename}（${n} 筆）→ 已寫入所選資料夾。`);
+    } else {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+      a.download = filename;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      log(`分段存檔：${filename}（${n} 筆）→ 已下載。`);
+    }
+    S.csvRows = [];
+    S.segStart = performance.now();
+  } catch (e) {
+    log(`分段存檔失敗：${e.message}`);
+  } finally {
+    S.segBusy = false;
+  }
 }
 
 function stopRecording(download = true) {
@@ -329,6 +396,50 @@ function readAdcInputs() {
 function bindEvents() {
   $("btnConnect").onclick = connectSerial;
   $("btnDisconnect").onclick = disconnectSerial;
+  $("btnForget").onclick = forgetDevice;
+
+  // 實體拔線時自動更新連線狀態
+  if ("serial" in navigator && navigator.serial.addEventListener) {
+    navigator.serial.addEventListener("disconnect", () => {
+      if (S.connected) {
+        log("裝置已拔除。");
+        disconnectSerial();
+      }
+    });
+  }
+
+  // 自動分段存檔：每 5 秒檢查一次是否到段
+  setInterval(() => {
+    if (S.segMs > 0 && S.connected && S.hasData && S.csvRows.length &&
+        performance.now() - S.segStart >= S.segMs) {
+      flushSegment();
+    }
+  }, 5000);
+
+  $("btnPickDir").onclick = async () => {
+    if (!("showDirectoryPicker" in window)) {
+      log("此瀏覽器不支援選擇資料夾，分段將以自動下載方式保存。");
+      return;
+    }
+    try {
+      S.dirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+      $("dirName").textContent = S.dirHandle.name;
+      log(`儲存資料夾：${S.dirHandle.name}（此分頁開啟期間有效）。`);
+    } catch (e) {
+      if (e.name !== "AbortError") log(`選擇資料夾失敗：${e.message}`);
+    }
+  };
+  if (!("showDirectoryPicker" in window)) {
+    $("btnPickDir").disabled = true;
+    $("segHint").textContent = "此瀏覽器不支援直接寫入資料夾，分段將以自動下載方式保存（檔名含時間戳）。";
+  }
+
+  $("segSel").onchange = (e) => {
+    S.segMs = parseInt(e.target.value, 10) || 0;
+    S.segStart = performance.now();
+    saveSettings();
+    log(S.segMs ? `自動分段存檔：每 ${e.target.selectedOptions[0].text}存一段。` : "自動分段存檔：關閉。");
+  };
 
   $("intervalInput").onchange = (e) => {
     S.interval = Math.max(1, parseInt(e.target.value, 10) || 1);
@@ -351,10 +462,10 @@ function bindEvents() {
     const isSens = S.mode === "SENSITIVITY";
     $("btnMode").textContent = isSens ? "靈敏度模式" : "電阻模式";
     $("btnMode").classList.toggle("on", isSens);
-    $("chartTitle").textContent = isSens ? "監控 — 靈敏度 (R/R0)" : "監控 — 電阻 (kΩ)";
+    $("chartTitle").textContent = isSens ? "即時監控圖 — 靈敏度 (R/R0)" : "即時監控圖 — 電阻 (kΩ)";
     // 重建圖表序列以切換數值
     mainChart.clear();
-    for (const ch of S.channels) mainChart.setSeries(ch, "#8e8e93");
+    for (const ch of S.channels) mainChart.setSeries(ch, "#94a3b8");
     const n = S.timeBuf.length;
     for (let i = 0; i < n; i++) {
       const t = S.timeBuf[i];
@@ -413,7 +524,6 @@ function bindEvents() {
   window.addEventListener("beforeunload", () => {
     if (S.recording && S.recResRows.length) {
       downloadCSV(`gas_resistance_${stamp()}.csv`, S.recResRows);
-      if (S.recSensRows.length) downloadCSV(`gas_senstivity_${stamp()}.csv`, S.recSensRows);
     }
   });
 }
@@ -429,12 +539,14 @@ function drawTimer() {
 function saveSettings() {
   store.save({
     baud: $("baudSel").value, interval: S.interval, adc: S.adc, rules: S.rules,
+    segMs: S.segMs,
   });
 }
 function loadSettings() {
   const c = store.load();
   if (c.baud) $("baudSel").value = c.baud;
   if (c.interval) { S.interval = c.interval; $("intervalInput").value = c.interval; }
+  if (c.segMs) { S.segMs = c.segMs; $("segSel").value = String(c.segMs); }
   if (Array.isArray(c.adc) && c.adc.length === 4) {
     S.adc = c.adc;
     ["adc1", "adc2", "adc3", "adc4"].forEach((id, i) => { $(id).value = c.adc[i]; });
