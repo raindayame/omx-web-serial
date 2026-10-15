@@ -20,6 +20,12 @@ function log(msg) {
   box.scrollTop = box.scrollHeight;
 }
 
+// 結構化事件（Keithley 模式匯出用），同時寫入日誌
+function recordEvent(kind, msg) {
+  S.events.push({ t: new Date(), kind, msg });
+  log(`[${kind}] ${msg}`);
+}
+
 /* ---------------- 設定（localStorage） ---------------- */
 const store = {
   load() {
@@ -35,6 +41,7 @@ const store = {
 const S = {
   port: null, reader: null, writer: null, keepReading: false,
   connected: false,
+  instrument: "esp32",
   channels: [], hasData: false,
   interval: 1, startTime: 0, lastRecordSec: 0,
   accum: {}, tempAcc: [], humdAcc: [],
@@ -45,6 +52,12 @@ const S = {
   timerSec: 0, timerRunning: false,
   chPage: 0,
   dirHandle: null, segMs: 0, segStart: 0, segBusy: false,
+  events: [],
+  k: {
+    vSet: 1.0, comp: 0.1, outputOn: false, paused: false,
+    buf: "", pending: null, loopRunning: false,
+    samples: [], baselines: [],
+  },
   adc: [3.28, 3.27, 3.27, 3.28],
   rules: {
     resistance: { enabled: false, min: 0, max: 1000 },
@@ -66,14 +79,31 @@ function initCharts() {
 }
 
 /* ---------------- 序列埠 ---------------- */
-async function openPort(port, baudRate) {
+// 取得已開啟的 port：重用上次的 → 已配對的 → 選擇器
+async function acquirePort(baudRate) {
+  if (S.port) {
+    try { await S.port.open({ baudRate }); return S.port; }
+    catch { S.port = null; } // 裝置可能已拔除
+  }
+  const ports = await navigator.serial.getPorts();
+  if (ports.length) {
+    try { await ports[0].open({ baudRate }); S.port = ports[0]; return S.port; }
+    catch { /* 掉到選擇器 */ }
+  }
+  const port = await navigator.serial.requestPort(); // 使用者取消會丟 NotFoundError
   await port.open({ baudRate });
+  S.port = port;
+  return port;
+}
+
+async function esp32Setup(port, baudRate) {
   S.port = port;
   S.writer = port.writable.getWriter();
   resetSession();
   S.connected = true;
   S.keepReading = true;
   updateConnUI();
+  log(`已連接 COM（${baudRate} baud），等待硬體資料以進行通道自適應偵測…`);
   readLoop();
 }
 
@@ -84,27 +114,9 @@ async function connectSerial() {
   }
   const baudRate = parseInt($("baudSel").value, 10);
   try {
-    // 1) 重用上次的 port（斷開後未拔線）：直接重開，不再跳選擇器
-    if (S.port) {
-      try {
-        await openPort(S.port, baudRate);
-        log(`已重新連接（${baudRate} baud），等待硬體資料…`);
-        return;
-      } catch (e) {
-        S.port = null; // 裝置可能已拔除，改走選擇器
-      }
-    }
-    // 2) 取回已配對過的 port
-    const ports = await navigator.serial.getPorts();
-    if (ports.length) {
-      await openPort(ports[0], baudRate);
-      log(`已連接已配對裝置（${baudRate} baud），等待硬體資料…`);
-      return;
-    }
-    // 3) 首次使用：跳出選擇器
-    const port = await navigator.serial.requestPort();
-    await openPort(port, baudRate);
-    log(`已連接 COM（${baudRate} baud），等待硬體資料以進行通道自適應偵測…`);
+    const port = await acquirePort(baudRate);
+    if (S.instrument === "keithley") await keithleySetup(port, baudRate);
+    else await esp32Setup(port, baudRate);
   } catch (e) {
     if (e.name !== "NotFoundError") log(`連線失敗：${e.message}`);
   }
@@ -112,6 +124,22 @@ async function connectSerial() {
 
 async function disconnectSerial() {
   S.keepReading = false;
+  // Keithley：先關 Output 並驗證（安全）
+  if (S.instrument === "keithley" && S.connected && S.k.outputOn) {
+    try {
+      await scpiWrite(":OUTP OFF");
+      await new Promise((r) => setTimeout(r, 300));
+      const st = await scpiQuery(":OUTP?", 2000).catch(() => null);
+      S.k.outputOn = false;
+      if (st && st.trim() !== "0" && st.trim() !== "+0") {
+        recordEvent("SAFETY", "OUTPUT OFF 未驗證：" + st);
+        log("警告：無法確認 Output 已關閉，請檢查儀器面板。");
+      } else {
+        recordEvent("OUTPUT", "OFF");
+      }
+    } catch (e) { log("關閉 Output 失敗：" + e.message); }
+    S.k.outputOn = false;
+  }
   try { if (S.reader) await S.reader.cancel(); } catch {}
   try { if (S.writer) { S.writer.releaseLock(); } } catch {}
   try { if (S.port) await S.port.close(); } catch {}
@@ -129,6 +157,241 @@ async function forgetDevice() {
   } catch {}
   S.port = null;
   log("已忘記裝置，下次連接會重新跳出選擇器。");
+}
+
+/* ---------------- Keithley 2400 SCPI ---------------- */
+function scpiWrite(cmd) {
+  return writeLine(cmd + "\n");
+}
+function scpiQuery(cmd, timeoutMs = 3000) {
+  return new Promise((resolve, reject) => {
+    if (S.k.pending) { reject(new Error("SCPI 忙碌中")); return; }
+    const timer = setTimeout(() => {
+      if (S.k.pending && S.k.pending.resolve === resolve) {
+        S.k.pending = null;
+        reject(new Error("SCPI 逾時：" + cmd));
+      }
+    }, timeoutMs);
+    S.k.pending = {
+      resolve: (v) => { clearTimeout(timer); S.k.pending = null; resolve(v); },
+      reject: (e) => { clearTimeout(timer); S.k.pending = null; reject(e); },
+    };
+    writeLine(cmd + "\n").catch(S.k.pending.reject);
+  });
+}
+function kHandleText(chunk) {
+  S.k.buf += chunk;
+  let idx;
+  while ((idx = S.k.buf.indexOf("\n")) >= 0) {
+    const line = S.k.buf.slice(0, idx).trim();
+    S.k.buf = S.k.buf.slice(idx + 1);
+    if (!line) continue;
+    if (S.k.pending) S.k.pending.resolve(line);
+    else log("儀器訊息：" + line);
+  }
+}
+
+function resetKeithleySession() {
+  Object.assign(S.k, {
+    buf: "", pending: null, paused: false, outputOn: false, loopRunning: false,
+    samples: [], baselines: [],
+  });
+  S.events = [];
+  S.channels = ["K2400"];
+  S.hasData = true;
+  S.csvRows = [];
+  S.startTime = performance.now(); S.lastRecordSec = 0;
+  S.segStart = performance.now();
+  S.timeBuf = []; S.dataBuf = { K2400: [] }; S.sensBuf = { K2400: [] };
+  S.tempBuf = []; S.humdBuf = [];
+  S.r0 = {}; S.hasR0 = false;
+  mainChart.clear();
+  mainChart.setSeries("K2400", "#38bdf8");
+  $("chartTitle").textContent = "即時監控圖 — 電阻 (Ω)";
+  renderChannelGrid();
+  $("chartInfo").textContent = "等待量測…";
+  $("btnKOutput").textContent = "Output ON";
+  $("btnKOutput").classList.remove("danger");
+  $("btnKPause").textContent = "暫停記錄";
+}
+
+async function keithleySetup(port, baudRate) {
+  S.port = port;
+  S.writer = port.writable.getWriter();
+  resetKeithleySession();
+  S.connected = true;
+  S.keepReading = true;
+  updateConnUI();
+  readLoop(); // SCPI 回應經 handleText → kHandleText
+  recordEvent("CONNECT", `Keithley 2400（${baudRate} baud, RS-232）`);
+  try {
+    const idn = await scpiQuery("*IDN?");
+    recordEvent("IDN", idn);
+    if (!/2400/i.test(idn)) throw new Error("不是 Keithley 2400：" + idn);
+    const init = ["*RST", ":OUTP OFF", ":SOUR:FUNC VOLT", ":SOUR:VOLT:MODE FIXED",
+      ":SENS:FUNC 'CURR'", `:SENS:CURR:PROT ${S.k.comp}`, ":SENS:CURR:RANG:AUTO ON",
+      ":SENS:CURR:NPLC 1", ":FORM:DATA ASC", ":FORM:ELEM VOLT,CURR,STAT", ":SOUR:VOLT 0"];
+    for (const c of init) await scpiWrite(c);
+    const err = await scpiQuery(":SYST:ERR?");
+    if (!/^\s*\+?0[\s,]/.test(err)) throw new Error("儀器設定錯誤：" + err);
+    recordEvent("INIT", "SCPI 初始化完成");
+    log("Keithley 2400 就緒：設定電壓後按「Output ON」開始量測。");
+  } catch (e) {
+    log("Keithley 初始化失敗：" + e.message);
+    recordEvent("ERROR", e.message);
+    await disconnectSerial();
+  }
+}
+
+// 量測迴圈：Output ON 且未暫停時輪詢 :READ?
+async function keithleyLoop() {
+  if (S.k.loopRunning) return;
+  S.k.loopRunning = true;
+  try {
+    while (S.keepReading && S.instrument === "keithley" && S.k.outputOn) {
+      if (!S.k.paused) {
+        try {
+          kHandleReading(await scpiQuery(":READ?"));
+        } catch (e) {
+          if (S.keepReading) log("讀取失敗：" + e.message);
+        }
+      }
+      await new Promise((r) => setTimeout(r, Math.max(400, S.interval * 1000)));
+    }
+  } finally {
+    S.k.loopRunning = false;
+  }
+}
+
+function kResponses(r, r0) {
+  const ok = (x) => Number.isFinite(x) && x > 0;
+  if (!(ok(r) && ok(r0))) return [NaN, NaN, NaN, NaN];
+  return [r0 / r, r / r0, (r - r0) / r0 * 100, (r - r0) / r * 100];
+}
+const fmtN = (x, d = 4) => Number.isFinite(x) ? x.toFixed(d) : "";
+
+function kHandleReading(resp) {
+  const parts = resp.split(",");
+  if (parts.length < 3) { recordEvent("READ_ERROR", "格式異常：" + resp); return; }
+  const v = parseFloat(parts[0]);
+  const i = parseFloat(parts[1]);
+  const stat = parseInt(parseFloat(parts[2]), 10);
+  const compliance = Boolean(stat & 8); // bit 3 = compliance
+  const valid = Number.isFinite(v) && Number.isFinite(i) && i !== 0 && (v / i) > 0 && !compliance;
+  const r = valid ? v / i : NaN;
+  const elapsed = Math.round((performance.now() - S.startTime) / 1000);
+  const sample = { t: new Date(), elapsed, vSet: S.k.vSet, v, i, r, compliance, valid };
+  S.k.samples.push(sample);
+  if (compliance) recordEvent("COMPLIANCE", `電流達上限 V_set=${S.k.vSet} V`);
+
+  pushBuf(S.timeBuf, elapsed);
+  pushBuf(S.dataBuf["K2400"], r);
+  mainChart.push("K2400", elapsed, r);
+  mainChart.draw(elapsed, "電阻 (Ω)", null);
+
+  const r0 = S.k.baselines.length ? S.k.baselines[S.k.baselines.length - 1].r0 : NaN;
+  const [r0r, rr0, d1, d2] = kResponses(r, r0);
+  S.csvRows.push([elapsed, S.k.vSet.toFixed(3),
+    Number.isFinite(v) ? v.toFixed(6) : "", Number.isFinite(i) ? i.toExponential(4) : "",
+    fmtN(r), fmtN(r0), fmtN(r0r), fmtN(rr0), fmtN(d1), fmtN(d2), compliance ? 1 : 0]);
+
+  kUpdateLive(sample, r0, [r0r, rr0, d1, d2]);
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
+  const ss = String(elapsed % 60).padStart(2, "0");
+  $("chartInfo").textContent =
+    `已記錄 ${S.timeBuf.length} 點 · 經過 ${mm}:${ss} · Keithley 2400` + (S.k.paused ? " · 已暫停" : "");
+}
+
+function kUpdateLive(s, r0, resp) {
+  $("kV").textContent = Number.isFinite(s.v) ? s.v.toFixed(4) : "--";
+  $("kI").textContent = Number.isFinite(s.i) ? s.i.toExponential(3) : "--";
+  $("kR").textContent = Number.isFinite(s.r) ? s.r.toFixed(2) : "--";
+  $("kR0").textContent = Number.isFinite(r0) ? r0.toFixed(2) : "--";
+  const ids = ["kResp0", "kResp1", "kResp2", "kResp3"];
+  resp.forEach((x, n) => { $(ids[n]).textContent = Number.isFinite(x) ? x.toFixed(4) : "--"; });
+  if (s.compliance) $("kR").textContent += " ⚠";
+}
+
+/* ---------------- Keithley 控制 ---------------- */
+async function kApplyVoltage() {
+  const v = parseFloat($("kVolt").value);
+  if (!(v >= 0 && v <= 5)) { log("電壓需在 0–5 V 之間。"); return; }
+  S.k.vSet = v;
+  saveSettings();
+  if (S.connected && S.instrument === "keithley") {
+    try {
+      await scpiWrite(`:SOUR:VOLT ${v}`);
+      recordEvent("V_SET", `${v} V`);
+    } catch (e) { log("設定電壓失敗：" + e.message); }
+  } else {
+    log(`V_set 已設為 ${v} V（連接後生效）。`);
+  }
+}
+
+async function kApplyCompliance() {
+  const c = parseFloat($("kComp").value);
+  if (!(c > 0 && c <= 1)) { log("Compliance 需在 0–1 A 之間。"); return; }
+  S.k.comp = c;
+  saveSettings();
+  if (S.connected && S.instrument === "keithley") {
+    try {
+      await scpiWrite(`:SENS:CURR:PROT ${c}`);
+      recordEvent("COMPLIANCE_SET", `${c} A`);
+    } catch (e) { log("設定 Compliance 失敗：" + e.message); }
+  }
+}
+
+async function kToggleOutput() {
+  if (!S.connected || S.instrument !== "keithley") { log("請先連接 Keithley 2400。"); return; }
+  try {
+    if (!S.k.outputOn) {
+      await scpiWrite(`:SOUR:VOLT ${S.k.vSet}`);
+      await scpiWrite(":OUTP ON");
+      S.k.outputOn = true;
+      S.k.paused = false;
+      $("btnKPause").textContent = "暫停記錄";
+      S.startTime = performance.now();
+      S.segStart = performance.now();
+      recordEvent("OUTPUT", `ON（V_set=${S.k.vSet} V）`);
+      $("btnKOutput").textContent = "Output OFF";
+      $("btnKOutput").classList.add("danger");
+      keithleyLoop();
+    } else {
+      await scpiWrite(":OUTP OFF");
+      const st = await scpiQuery(":OUTP?", 2000).catch(() => null);
+      S.k.outputOn = false;
+      const verified = st && /^\s*\+?0(\.0*)?\s*$/.test(st);
+      recordEvent("OUTPUT", "OFF" + (verified ? "" : "（未驗證！）"));
+      $("btnKOutput").textContent = "Output ON";
+      $("btnKOutput").classList.remove("danger");
+      if (!verified) log("警告：無法確認 Output 已關閉，請檢查儀器面板。");
+    }
+  } catch (e) { log("Output 切換失敗：" + e.message); }
+}
+
+function kTogglePause() {
+  if (!S.connected || S.instrument !== "keithley") return;
+  S.k.paused = !S.k.paused;
+  $("btnKPause").textContent = S.k.paused ? "繼續記錄" : "暫停記錄";
+  recordEvent(S.k.paused ? "PAUSE" : "RESUME", S.k.paused ? "記錄暫停，Output 保持開啟" : "記錄繼續");
+}
+
+function kSetBase() {
+  if (!S.k.samples.length) { log("尚無資料，無法設置 Rair。"); return; }
+  const n = Math.max(1, parseInt($("kBaseN").value, 10) || 10);
+  const trailing = [];
+  const expectedV = S.k.samples[S.k.samples.length - 1].vSet;
+  for (let idx = S.k.samples.length - 1; idx >= 0; idx--) {
+    const s = S.k.samples[idx];
+    if (!(s.valid && s.r > 0 && Math.abs(s.vSet - expectedV) < 1e-9)) break;
+    trailing.push(s);
+    if (trailing.length >= n) break;
+  }
+  if (trailing.length < n) { log(`R0 被拒：需要 ${n} 個連續有效樣本，僅 ${trailing.length} 個。`); return; }
+  const r0 = trailing.reduce((a, s) => a + s.r, 0) / trailing.length;
+  S.k.baselines.push({ idx: S.k.samples.length - 1, r0, time: new Date(), count: n, vSet: expectedV });
+  recordEvent("BASE", `R0=${r0.toExponential(4)} Ω（N=${n}，V_set=${expectedV} V）`);
+  log(`設置 Rair 成功：R0=${r0.toExponential(4)} Ω。`);
 }
 
 async function readLoop() {
@@ -152,6 +415,7 @@ async function writeLine(text) {
 }
 
 function handleText(chunk) {
+  if (S.instrument === "keithley") { kHandleText(chunk); return; }
   S.lineBuf += chunk;
   let idx;
   while ((idx = S.lineBuf.indexOf("\n")) >= 0) {
@@ -321,10 +585,49 @@ function resetSession() {
   if (S.recording) stopRecording(false);
 }
 
+/* ---------------- 儀器切換 ---------------- */
+const BAUDS = {
+  esp32: ["9600", "115200"],
+  keithley: ["9600", "19200", "38400", "57600"],
+};
+function applyInstrumentUI(mode) {
+  const sel = $("baudSel");
+  sel.innerHTML = "";
+  for (const b of BAUDS[mode]) {
+    const o = document.createElement("option");
+    o.value = b; o.textContent = b;
+    sel.appendChild(o);
+  }
+  sel.value = mode === "keithley" ? "9600" : "115200";
+  $("kCard").hidden = mode !== "keithley";
+  $("adcCard").hidden = mode === "keithley";
+  $("envCard").hidden = mode === "keithley";
+  $("measCard").hidden = mode === "keithley";
+  $("chartTitle").textContent = mode === "keithley" ? "即時監控圖 — 電阻 (Ω)" : "即時監控圖 — 電阻 (kΩ)";
+}
+async function setInstrument(mode) {
+  if (mode !== "esp32" && mode !== "keithley") return;
+  if (S.connected) await disconnectSerial();
+  S.instrument = mode;
+  applyInstrumentUI(mode);
+  const c = store.load();
+  if (c.baud && BAUDS[mode].includes(c.baud)) $("baudSel").value = c.baud;
+  saveSettings();
+  log(mode === "keithley"
+    ? "已切換為 Keithley 2400 模式（經 RS-232，預設 9600 baud）。"
+    : "已切換為 ESP32 模式。");
+}
+
 /* ---------------- CSV 下載 / 分段存檔 ---------------- */
+function csvHeader() {
+  if (S.instrument === "keithley") {
+    return ["Time(s)", "V_set(V)", "V_meas(V)", "I_meas(A)", "R(Ohm)", "R0(Ohm)",
+      "R0/R", "R/R0", "dR_R0(%)", "dR_R(%)", "Compliance"];
+  }
+  return ["Time(s)", ...S.channels, "TEMP", "HUMD"];
+}
 function buildCSVText(rows) {
-  const header = ["Time(s)", ...S.channels, "TEMP", "HUMD"];
-  return "\uFEFF" + [header, ...rows].map((r) => r.join(",")).join("\r\n");
+  return "\uFEFF" + [csvHeader(), ...rows].map((r) => r.join(",")).join("\r\n");
 }
 function downloadCSV(filename, rows) {
   const a = document.createElement("a");
@@ -339,8 +642,7 @@ function stamp() {
 }
 
 // 自動分段：時間到就把 csvRows 寫成一段新檔並清空記憶體
-async function flushSegment() {
-  if (S.segBusy || !S.csvRows.length || !S.hasData) return;
+async function flushSegment() {  if (S.segBusy || !S.csvRows.length || !S.hasData) return;
   S.segBusy = true;
   try {
     const filename = `omx_${stamp()}.csv`;
@@ -366,6 +668,96 @@ async function flushSegment() {
     log(`分段存檔失敗：${e.message}`);
   } finally {
     S.segBusy = false;
+  }
+}
+
+/* ---------------- Keithley Excel 匯出 ---------------- */
+function ensureExcelJS() {
+  if (window.ExcelJS) return Promise.resolve();
+  log("載入 Excel 元件…");
+  return new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";
+    s.onload = res;
+    s.onerror = () => rej(new Error("ExcelJS 載入失敗（需網路）"));
+    document.head.appendChild(s);
+  });
+}
+function kSampleRows() {
+  let bi = 0, r0 = NaN;
+  return S.k.samples.map((s, idx) => {
+    while (bi < S.k.baselines.length && S.k.baselines[bi].idx <= idx) {
+      r0 = S.k.baselines[bi].r0; bi++;
+    }
+    const rr = kResponses(s.r, r0);
+    return [s.elapsed, s.vSet.toFixed(3),
+      Number.isFinite(s.v) ? s.v.toFixed(6) : "", Number.isFinite(s.i) ? s.i.toExponential(4) : "",
+      fmtN(s.r), fmtN(r0), fmtN(rr[0]), fmtN(rr[1]), fmtN(rr[2]), fmtN(rr[3]), s.compliance ? 1 : 0,
+      s.t.toLocaleString("zh-TW", { hour12: false })];
+  });
+}
+async function kExportExcel() {
+  if (!S.k.samples.length) { log("無資料可匯出。"); return; }
+  try {
+    await ensureExcelJS();
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "OMX Web Serial";
+    wb.created = new Date();
+
+    // Report（含圖表）
+    const rep = wb.addWorksheet("Report");
+    rep.getCell("A1").value = "Gas Sensor Measurement Report";
+    rep.getCell("A1").font = { size: 18, bold: true, color: { argb: "FF164B70" } };
+    rep.getCell("A2").value = "Keithley 2400（Web Serial / RS-232）";
+    rep.getCell("A3").value =
+      `Samples: ${S.k.samples.length} | Baselines: ${S.k.baselines.length} | 匯出時間：${new Date().toLocaleString("zh-TW", { hour12: false })}`;
+    try {
+      const png = $("mainChart").toDataURL("image/png").split(",")[1];
+      const imgId = wb.addImage({ base64: png, extension: "png" });
+      rep.addImage(imgId, "A5:H28");
+    } catch (e) { rep.getCell("A5").value = "圖表擷取失敗：" + e.message; }
+
+    // Data
+    const ws = wb.addWorksheet("Data");
+    ws.addRow([...csvHeader(), "DateTime"]);
+    for (const r of kSampleRows()) ws.addRow(r);
+
+    // Baselines
+    const wb2 = wb.addWorksheet("Baselines");
+    wb2.addRow(["Segment", "Index", "DateTime", "R0 (Ohm)", "Average N", "V_set (V)"]);
+    S.k.baselines.forEach((b, n) => wb2.addRow(
+      [n + 1, b.idx, b.time.toLocaleString("zh-TW", { hour12: false }), b.r0, b.count, b.vSet]));
+
+    // Events
+    const we = wb.addWorksheet("Events");
+    we.addRow(["DateTime", "Type", "Message"]);
+    for (const e of S.events) we.addRow(
+      [e.t.toLocaleString("zh-TW", { hour12: false }), e.kind, e.msg]);
+
+    // Summary
+    const wsum = wb.addWorksheet("Summary");
+    const valid = S.k.samples.filter((s) => s.valid).length;
+    [["Parameter", "Value"],
+     ["Instrument", "Keithley 2400 (RS-232 / Web Serial)"],
+     ["Samples", S.k.samples.length],
+     ["Valid samples", valid],
+     ["Baselines", S.k.baselines.length],
+     ["Sample interval (s)", S.interval],
+     ["Current compliance (A)", S.k.comp],
+     ["Response definitions", "R0/R, R/R0, (R-R0)/R0*100%, (R-R0)/R*100%"],
+    ].forEach((r) => wsum.addRow(r));
+
+    const buf = await wb.xlsx.writeBuffer();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([buf], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }));
+    a.download = `keithley2400_${stamp()}.xlsx`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    recordEvent("EXPORT", "Excel 已匯出（" + S.k.samples.length + " 筆）。");
+  } catch (e) {
+    log("Excel 匯出失敗：" + e.message);
   }
 }
 
@@ -397,6 +789,17 @@ function bindEvents() {
   $("btnConnect").onclick = connectSerial;
   $("btnDisconnect").onclick = disconnectSerial;
   $("btnForget").onclick = forgetDevice;
+
+  $("instSel").onchange = (e) => setInstrument(e.target.value);
+
+  // Keithley 控制
+  $("btnKVolt").onclick = kApplyVoltage;
+  $("kVolt").onchange = kApplyVoltage;
+  $("kComp").onchange = kApplyCompliance;
+  $("btnKOutput").onclick = kToggleOutput;
+  $("btnKPause").onclick = kTogglePause;
+  $("btnKBase").onclick = kSetBase;
+  $("btnKExcel").onclick = kExportExcel;
 
   // 實體拔線時自動更新連線狀態
   if ("serial" in navigator && navigator.serial.addEventListener) {
@@ -522,6 +925,10 @@ function bindEvents() {
   }
 
   window.addEventListener("beforeunload", () => {
+    // Keithley 安全：盡力關閉 Output（同步寫入，不等待回應）
+    if (S.instrument === "keithley" && S.connected && S.k.outputOn) {
+      try { S.writer.write(new TextEncoder().encode(":OUTP OFF\n")); } catch {}
+    }
     if (S.recording && S.recResRows.length) {
       downloadCSV(`gas_resistance_${stamp()}.csv`, S.recResRows);
     }
@@ -539,12 +946,24 @@ function drawTimer() {
 function saveSettings() {
   store.save({
     baud: $("baudSel").value, interval: S.interval, adc: S.adc, rules: S.rules,
-    segMs: S.segMs,
+    segMs: S.segMs, instrument: S.instrument, kVolt: S.k.vSet, kComp: S.k.comp,
   });
 }
 function loadSettings() {
   const c = store.load();
-  if (c.baud) $("baudSel").value = c.baud;
+  if (c.instrument === "keithley" || c.instrument === "esp32") {
+    // 先套用儀器（會重建鮑率選項），再套用其他設定
+    S.instrument = c.instrument;
+    $("instSel").value = c.instrument;
+    applyInstrumentUI(c.instrument);
+  }
+  if (c.baud && BAUDS[S.instrument].includes(c.baud)) $("baudSel").value = c.baud;
+  if (Number.isFinite(c.kVolt) && c.kVolt >= 0 && c.kVolt <= 5) {
+    S.k.vSet = c.kVolt; $("kVolt").value = c.kVolt;
+  }
+  if (Number.isFinite(c.kComp) && c.kComp > 0 && c.kComp <= 1) {
+    S.k.comp = c.kComp; $("kComp").value = c.kComp;
+  }
   if (c.interval) { S.interval = c.interval; $("intervalInput").value = c.interval; }
   if (c.segMs) { S.segMs = c.segMs; $("segSel").value = String(c.segMs); }
   if (Array.isArray(c.adc) && c.adc.length === 4) {

@@ -17,6 +17,13 @@
     <section class="card">
       <h2>連線</h2>
       <div class="row">
+        <label>儀器</label>
+        <select id="instSel">
+          <option value="esp32" selected>ESP32</option>
+          <option value="keithley">Keithley 2400</option>
+        </select>
+      </div>
+      <div class="row">
         <label>鮑率</label>
         <select id="baudSel">
           <option value="9600">9600</option>
@@ -32,7 +39,45 @@
         <button id="btnDisconnect" disabled>斷開</button>
         <button id="btnForget" title="忘記已配對裝置，下次連接重新選擇">換裝置</button>
       </div>
-      <div class="hint">僅 Chrome / Edge 支援 Web Serial。頁面需經 HTTPS 開啟。斷開後不需重選，直接按「連接 COM」即可重連。</div>
+      <div class="hint">僅 Chrome / Edge 支援 Web Serial。頁面需經 HTTPS 開啟。斷開後不需重選，直接按「連接 COM」即可重連。Keithley 2400 請經 USB 轉 RS-232 線連接。</div>
+    </section>
+
+    <section class="card" id="kCard" hidden>
+      <h2>Keithley 2400 控制</h2>
+      <div class="row">
+        <label>設定電壓</label>
+        <input type="number" id="kVolt" value="1.0" min="0" max="5" step="0.1">
+        <span class="muted">V</span>
+        <button id="btnKVolt">套用</button>
+      </div>
+      <div class="row">
+        <label>Compliance</label>
+        <input type="number" id="kComp" value="0.1" min="0.001" max="1" step="0.01">
+        <span class="muted">A</span>
+      </div>
+      <div class="btn-row">
+        <button id="btnKOutput" class="primary">Output ON</button>
+        <button id="btnKPause">暫停記錄</button>
+      </div>
+      <div class="row">
+        <label>R0 取樣數</label>
+        <input type="number" id="kBaseN" value="10" min="1" max="120">
+        <button id="btnKBase">設置 Rair</button>
+      </div>
+      <div class="k-live" id="kLive">
+        <div><span class="muted">V 量測</span><strong id="kV">--</strong> V</div>
+        <div><span class="muted">I 量測</span><strong id="kI">--</strong> A</div>
+        <div><span class="muted">R</span><strong id="kR">--</strong> Ω</div>
+        <div><span class="muted">R0</span><strong id="kR0">--</strong> Ω</div>
+        <div><span class="muted">R0/R</span><strong id="kResp0">--</strong></div>
+        <div><span class="muted">R/R0</span><strong id="kResp1">--</strong></div>
+        <div><span class="muted">ΔR/R0</span><strong id="kResp2">--</strong> %</div>
+        <div><span class="muted">ΔR/R</span><strong id="kResp3">--</strong> %</div>
+      </div>
+      <div class="btn-row">
+        <button id="btnKExcel">匯出 Excel</button>
+      </div>
+      <div class="hint">暫停只停止記錄，Output 保持開啟。關閉頁面前請先按「斷開」以關閉 Output。</div>
     </section>
 
     <section class="card">
@@ -63,7 +108,7 @@
       <div class="hint">各工具為獨立頁面，功能互不干擾。</div>
     </section>
 
-    <section class="card">
+    <section class="card" id="adcCard">
       <h2>ADC 校正</h2>
       <div class="adc-grid">
         <label>ADC1 <input type="number" step="0.001" id="adc1" value="3.28"></label>
@@ -77,7 +122,7 @@
       </div>
     </section>
 
-    <section class="card">
+    <section class="card" id="measCard">
       <h2>量測控制</h2>
       <div class="btn-row">
         <button id="btnMode" class="toggle">電阻模式</button>
@@ -115,7 +160,7 @@
       </div>
     </section>
 
-    <section class="card">
+    <section class="card" id="envCard">
       <h2>模組環境</h2>
       <div class="env-grid">
         <div><span class="muted">溫度</span><strong id="modTemp">--</strong> ℃</div>
