@@ -51,7 +51,7 @@ const S = {
   csvRows: [], recording: false, recResRows: [], recSensRows: [],
   timerSec: 0, timerRunning: false,
   chPage: 0,
-  dirHandle: null, segMs: 0, segStart: 0, segBusy: false,
+  dirHandle: null, segMs: 0, segStart: 0, segBusy: false, segFileHandle: null,
   events: [],
   k: {
     vSet: 1.0, comp: 0.1, outputOn: false, paused: false,
@@ -201,7 +201,7 @@ function resetKeithleySession() {
   S.hasData = true;
   S.csvRows = [];
   S.startTime = performance.now(); S.lastRecordSec = 0;
-  S.segStart = performance.now();
+  S.segStart = performance.now(); S.segFileHandle = null;
   S.timeBuf = []; S.dataBuf = { K2400: [] }; S.sensBuf = { K2400: [] };
   S.tempBuf = []; S.humdBuf = [];
   S.r0 = {}; S.hasR0 = false;
@@ -577,7 +577,7 @@ function resetSession() {
     accum: {}, tempAcc: [], humdAcc: [],
     timeBuf: [], dataBuf: {}, sensBuf: {}, tempBuf: [], humdBuf: [],
     r0: {}, hasR0: false, csvRows: [], lineBuf: "",
-    segStart: performance.now(),
+    segStart: performance.now(), segFileHandle: null,
   });
   mainChart.clear(); envChart.clear();
   $("chGrid").innerHTML = "";
@@ -643,20 +643,28 @@ function stamp() {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
-// 自動分段：時間到就把 csvRows 寫成一段新檔並清空記憶體
+// 自動分段：時間到就把 csvRows 追加到同一檔案並清空記憶體
 async function flushSegment() {  if (S.segBusy || !S.csvRows.length || !S.hasData) return;
   S.segBusy = true;
   try {
-    const filename = `omx_${stamp()}.csv`;
-    const text = buildCSVText(S.csvRows);
     const n = S.csvRows.length;
     if (S.dirHandle) {
-      const fh = await S.dirHandle.getFileHandle(filename, { create: true });
-      const w = await fh.createWritable();
+      // 同一場量測共用一個檔：首次分段建檔，之後追加
+      if (!S.segFileHandle) {
+        S.segFileHandle = await S.dirHandle.getFileHandle(`omx_${stamp()}.csv`, { create: true });
+      }
+      const f = await S.segFileHandle.getFile();
+      const body = S.csvRows.map((r) => r.join(",")).join("\r\n") + "\r\n";
+      const text = (f.size === 0 ? "\uFEFF" + csvHeader().join(",") + "\r\n" : "") + body;
+      const w = await S.segFileHandle.createWritable({ keepExistingData: true });
+      await w.seek(f.size);
       await w.write(text);
       await w.close();
-      log(`分段存檔：${filename}（${n} 筆）→ 已寫入所選資料夾。`);
+      log(`分段存檔：已追加 ${n} 筆 → 所選資料夾（同一檔案累積）。`);
     } else {
+      // 下載模式無法追加，維持每段一個檔
+      const filename = `omx_${stamp()}.csv`;
+      const text = buildCSVText(S.csvRows);
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
       a.download = filename;
@@ -828,6 +836,7 @@ function bindEvents() {
     }
     try {
       S.dirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+      S.segFileHandle = null; // 換資料夾 → 下一場量測建新檔
       $("dirName").textContent = S.dirHandle.name;
       log(`儲存資料夾：${S.dirHandle.name}（此分頁開啟期間有效）。`);
     } catch (e) {
