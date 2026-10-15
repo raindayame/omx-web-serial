@@ -13,8 +13,9 @@
 </header>
 
 <div class="layout">
-  <aside class="sidebar">
-    <section class="card">
+  <div class="layout">
+  <aside class="sidebar sidebar-left">
+<section class="card">
       <h2>連線</h2>
       <div class="row">
         <label>儀器</label>
@@ -42,7 +43,64 @@
       <div class="hint">僅 Chrome / Edge 支援 Web Serial。頁面需經 HTTPS 開啟。斷開後不需重選，直接按「連接 COM」即可重連。Keithley 2400 請經 USB 轉 RS-232 線連接。</div>
     </section>
 
-    <section class="card" id="kCard" hidden>
+<section class="card">
+      <h2>自動分段存檔</h2>
+      <div class="btn-row">
+        <button id="btnPickDir">選擇儲存資料夾</button>
+        <span id="dirName" class="muted">未選擇</span>
+      </div>
+      <div class="row">
+        <label>分段間隔</label>
+        <select id="segSel">
+          <option value="0" selected>關閉</option>
+          <option value="900000">15 分鐘</option>
+          <option value="1800000">30 分鐘</option>
+          <option value="3600000">1 小時</option>
+        </select>
+      </div>
+      <div class="hint" id="segHint">已選資料夾時，整場量測寫入同一檔案、分段追加；每段存檔後清空記憶體，可長時間量測。不支援資料夾寫入時改用下載（每段一個檔）。</div>
+    </section>
+
+<section class="card">
+      <h2>資料分析工具</h2>
+      <div class="btn-row" style="flex-direction:column;align-items:stretch">
+        <a href="tools/log-response-ln/"><button style="width:100%">電壓－濃度統計分析</button></a>
+        <a href="tools/gas-wave-analyzer/"><button style="width:100%">Gas Wave Analyzer</button></a>
+        <a href="tools/ethanol-prediction/"><button style="width:100%">乙醇多電壓濃度預測</button></a>
+      </div>
+      <div class="hint">各工具為獨立頁面，功能互不干擾。</div>
+    </section>
+  </aside>
+
+<main class="main">
+    <section class="card chart-card">
+      <div class="chart-head">
+        <h2 id="chartTitle">即時監控圖 — 電阻 (kΩ)</h2>
+        <div class="legend" id="chartLegend"></div>
+      </div>
+      <canvas id="mainChart"></canvas>
+      <div class="chart-foot muted" id="chartInfo">等待資料…</div>
+    </section>
+
+    <section class="card">
+      <div class="ch-head">
+        <h2>通道 <span id="chPageLabel"></span></h2>
+        <div class="btn-row">
+          <button id="btnChPrev">◀ 1–16</button>
+          <button id="btnChNext">17–32 ▶</button>
+        </div>
+      </div>
+      <div class="ch-grid" id="chGrid"></div>
+    </section>
+
+    <section class="card">
+      <h2>日誌</h2>
+      <div class="log" id="logBox"></div>
+    </section>
+  </main>
+
+  <aside class="sidebar sidebar-right">
+<section class="card" id="kCard" hidden>
       <h2>Keithley 2400 控制</h2>
       <div class="row">
         <label>設定電壓</label>
@@ -80,49 +138,7 @@
       <div class="hint">暫停只停止記錄，Output 保持開啟。關閉頁面前請先按「斷開」以關閉 Output。</div>
     </section>
 
-    <section class="card">
-      <h2>自動分段存檔</h2>
-      <div class="btn-row">
-        <button id="btnPickDir">選擇儲存資料夾</button>
-        <span id="dirName" class="muted">未選擇</span>
-      </div>
-      <div class="row">
-        <label>分段間隔</label>
-        <select id="segSel">
-          <option value="0" selected>關閉</option>
-          <option value="900000">15 分鐘</option>
-          <option value="1800000">30 分鐘</option>
-          <option value="3600000">1 小時</option>
-        </select>
-      </div>
-      <div class="hint" id="segHint">已選資料夾時，整場量測寫入同一檔案、分段追加；每段存檔後清空記憶體，可長時間量測。不支援資料夾寫入時改用下載（每段一個檔）。</div>
-    </section>
-
-    <section class="card">
-      <h2>資料分析工具</h2>
-      <div class="btn-row" style="flex-direction:column;align-items:stretch">
-        <a href="tools/log-response-ln/"><button style="width:100%">電壓－濃度統計分析</button></a>
-        <a href="tools/gas-wave-analyzer/"><button style="width:100%">Gas Wave Analyzer</button></a>
-        <a href="tools/ethanol-prediction/"><button style="width:100%">乙醇多電壓濃度預測</button></a>
-      </div>
-      <div class="hint">各工具為獨立頁面，功能互不干擾。</div>
-    </section>
-
-    <section class="card" id="adcCard">
-      <h2>ADC 校正</h2>
-      <div class="adc-grid">
-        <label>ADC1 <input type="number" step="0.001" id="adc1" value="3.28"></label>
-        <label>ADC2 <input type="number" step="0.001" id="adc2" value="3.27"></label>
-        <label>ADC3 <input type="number" step="0.001" id="adc3" value="3.27"></label>
-        <label>ADC4 <input type="number" step="0.001" id="adc4" value="3.28"></label>
-      </div>
-      <div class="btn-row">
-        <button id="btnCalSend">送出校正</button>
-        <span id="calState" class="muted"></span>
-      </div>
-    </section>
-
-    <section class="card" id="measCard">
+<section class="card" id="measCard">
       <h2>量測控制</h2>
       <div class="btn-row">
         <button id="btnMode" class="toggle">電阻模式</button>
@@ -140,7 +156,21 @@
       <div class="timer-display" id="timerDisplay">00:00:00</div>
     </section>
 
-    <section class="card">
+<section class="card" id="adcCard">
+      <h2>ADC 校正</h2>
+      <div class="adc-grid">
+        <label>ADC1 <input type="number" step="0.001" id="adc1" value="3.28"></label>
+        <label>ADC2 <input type="number" step="0.001" id="adc2" value="3.27"></label>
+        <label>ADC3 <input type="number" step="0.001" id="adc3" value="3.27"></label>
+        <label>ADC4 <input type="number" step="0.001" id="adc4" value="3.28"></label>
+      </div>
+      <div class="btn-row">
+        <button id="btnCalSend">送出校正</button>
+        <span id="calState" class="muted"></span>
+      </div>
+    </section>
+
+<section class="card">
       <h2>通道判定規則</h2>
       <div class="row">
         <label><input type="checkbox" id="ruleResEn"> 電阻啟用</label>
@@ -160,7 +190,7 @@
       </div>
     </section>
 
-    <section class="card" id="envCard">
+<section class="card" id="envCard">
       <h2>模組環境</h2>
       <div class="env-grid">
         <div><span class="muted">溫度</span><strong id="modTemp">--</strong> ℃</div>
@@ -169,33 +199,7 @@
       <canvas id="envChart" height="90"></canvas>
     </section>
   </aside>
-
-  <main class="main">
-    <section class="card chart-card">
-      <div class="chart-head">
-        <h2 id="chartTitle">即時監控圖 — 電阻 (kΩ)</h2>
-        <div class="legend" id="chartLegend"></div>
-      </div>
-      <canvas id="mainChart"></canvas>
-      <div class="chart-foot muted" id="chartInfo">等待資料…</div>
-    </section>
-
-    <section class="card">
-      <div class="ch-head">
-        <h2>通道 <span id="chPageLabel"></span></h2>
-        <div class="btn-row">
-          <button id="btnChPrev">◀ 1–16</button>
-          <button id="btnChNext">17–32 ▶</button>
-        </div>
-      </div>
-      <div class="ch-grid" id="chGrid"></div>
-    </section>
-
-    <section class="card">
-      <h2>日誌</h2>
-      <div class="log" id="logBox"></div>
-    </section>
-  </main>
+</div>
 </div>
 
 <script src="chart.js"></script>
