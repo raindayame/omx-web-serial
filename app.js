@@ -70,12 +70,9 @@ const MAXP = 3600;
 function pushBuf(arr, v) { arr.push(v); if (arr.length > MAXP) arr.shift(); }
 
 /* ---------------- 圖表 ---------------- */
-let mainChart, envChart;
+let mainChart;
 function initCharts() {
   mainChart = new LineChart($("mainChart"), { windowSec: 600 });
-  envChart = new LineChart($("envChart"), { windowSec: 600 });
-  envChart.setSeries("temp", "#f87171");
-  envChart.setSeries("humd", "#38bdf8");
 }
 
 /* ---------------- 序列埠 ---------------- */
@@ -487,8 +484,6 @@ function recordSample(recordSec) {
     sens[ch] = sv;
     mainChart.push(ch, recordSec, S.mode === "SENSITIVITY" ? sv : avg[ch]);
   }
-  envChart.push("temp", recordSec, avgT);
-  envChart.push("humd", recordSec, avgH);
 
   const row = [recordSec, ...S.channels.map((ch) => avg[ch].toFixed(3)), avgT.toFixed(2), avgH.toFixed(2)];
   S.csvRows.push(row);
@@ -535,11 +530,11 @@ function updateLiveUI(avg, sens, avgT, avgH, recordSec) {
     el.classList.toggle("fail", j === "fail");
     el.querySelector(".ch-badge").textContent = j === "pass" ? "PASS" : j === "fail" ? "NO PASS" : ch;
   }
+  refreshSparks();
 
   // 主圖
   const colorFn = activeRule().enabled ? (v) => channelColor(v) : null;
   mainChart.draw(recordSec, S.mode === "SENSITIVITY" ? "靈敏度 R/R0" : "電阻 kΩ", colorFn);
-  envChart.draw(recordSec, "℃ / %");
 
   const mm = String(Math.floor(recordSec / 60)).padStart(2, "0");
   const ss = String(recordSec % 60).padStart(2, "0");
@@ -558,8 +553,50 @@ function renderChannelGrid() {
     const d = document.createElement("div");
     d.className = "ch-card"; d.dataset.ch = ch;
     d.innerHTML = `<span class="ch-badge">${ch}</span><div class="ch-name">CH ${ch}</div>
-      <div><span class="ch-val">--</span> <span class="ch-unit"></span></div>`;
+      <div><span class="ch-val">--</span> <span class="ch-unit"></span></div>
+      <canvas class="ch-spark" height="44"></canvas>`;
     grid.appendChild(d);
+  }
+  refreshSparks();
+}
+
+/* 通道小趨勢圖：取該通道緩衝區最後一段畫迷你折線 */
+function drawSpark(cv, vals, color) {
+  if (!cv) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.max(60, cv.clientWidth || 120), h = 44;
+  const bw = Math.round(w * dpr), bh = Math.round(h * dpr);
+  if (cv.width !== bw || cv.height !== bh) { cv.width = bw; cv.height = bh; }
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#0b1220"; ctx.fillRect(0, 0, w, h);
+  const data = vals.filter(Number.isFinite);
+  if (data.length < 2) return;
+  let mn = Infinity, mx = -Infinity;
+  for (const v of data) { if (v < mn) mn = v; if (v > mx) mx = v; }
+  if (!(mx > mn)) mx = mn + 1;
+  const pad = (mx - mn) * 0.1 || 1; mn -= pad; mx += pad;
+  const n = data.length;
+  ctx.strokeStyle = color || "#38bdf8"; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const x = 2 + (i / (n - 1)) * (w - 4);
+    const y = h - 4 - ((data[i] - mn) / (mx - mn)) * (h - 8);
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  }
+  ctx.stroke();
+}
+
+function refreshSparks() {
+  const sensMode = S.mode === "SENSITIVITY";
+  for (const ch of S.channels) {
+    const el = document.querySelector(`[data-ch="${ch}"]`);
+    if (!el) continue;
+    const buf = sensMode ? S.sensBuf[ch] : S.dataBuf[ch];
+    const arr = buf || [];
+    const last = arr.length ? arr[arr.length - 1] : NaN;
+    const color = activeRule().enabled ? (channelColor(last) || "#475569") : "#38bdf8";
+    drawSpark(el.querySelector(".ch-spark"), arr.slice(-120), color);
   }
 }
 
@@ -579,7 +616,7 @@ function resetSession() {
     r0: {}, hasR0: false, csvRows: [], lineBuf: "",
     segStart: performance.now(), segFileHandle: null,
   });
-  mainChart.clear(); envChart.clear();
+  mainChart.clear();
   $("chGrid").innerHTML = "";
   $("chartInfo").textContent = "等待資料…";
   if (S.recording) stopRecording(false);
