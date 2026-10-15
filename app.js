@@ -611,11 +611,13 @@ async function setInstrument(mode) {
   S.instrument = mode;
   applyInstrumentUI(mode);
   const c = store.load();
-  if (c.baud && BAUDS[mode].includes(c.baud)) $("baudSel").value = c.baud;
+  const saved = c["baud_" + mode];
+  $("baudSel").value = (saved && BAUDS[mode].includes(saved)) ? saved
+    : (mode === "keithley" ? "9600" : "115200");
   saveSettings();
   log(mode === "keithley"
     ? "已切換為 Keithley 2400 模式（經 RS-232，預設 9600 baud）。"
-    : "已切換為 ESP32 模式。");
+    : "已切換為 ESP32 模式（預設 115200 baud）。");
 }
 
 /* ---------------- CSV 下載 / 分段存檔 ---------------- */
@@ -944,10 +946,12 @@ function drawTimer() {
 
 /* ---------------- 設定存取 ---------------- */
 function saveSettings() {
-  store.save({
-    baud: $("baudSel").value, interval: S.interval, adc: S.adc, rules: S.rules,
-    segMs: S.segMs, instrument: S.instrument, kVolt: S.k.vSet, kComp: S.k.comp,
-  });
+  const c = store.load();
+  c.baud = $("baudSel").value;
+  c["baud_" + S.instrument] = $("baudSel").value;
+  c.interval = S.interval; c.adc = S.adc; c.rules = S.rules;
+  c.segMs = S.segMs; c.instrument = S.instrument; c.kVolt = S.k.vSet; c.kComp = S.k.comp;
+  store.save(c);
 }
 function loadSettings() {
   const c = store.load();
@@ -958,6 +962,8 @@ function loadSettings() {
     applyInstrumentUI(c.instrument);
   }
   if (c.baud && BAUDS[S.instrument].includes(c.baud)) $("baudSel").value = c.baud;
+  const savedBaud = c["baud_" + S.instrument];
+  if (savedBaud && BAUDS[S.instrument].includes(savedBaud)) $("baudSel").value = savedBaud;
   if (Number.isFinite(c.kVolt) && c.kVolt >= 0 && c.kVolt <= 5) {
     S.k.vSet = c.kVolt; $("kVolt").value = c.kVolt;
   }
