@@ -49,6 +49,9 @@ class LineChart {
   draw(nowT, yLabel, colorFn) {
     const ctx = this.ctx, W = this.w, H = this.h;
     ctx.clearRect(0, 0, W, H);
+    // 整塊畫布先填深底，避免透明底被瀏覽器/外掛亂解讀
+    ctx.fillStyle = "#0b1220";
+    ctx.fillRect(0, 0, W, H);
     const pw = W - this.padL - this.padR, ph = H - this.padT - this.padB;
     if (pw <= 0 || ph <= 0) return;
 
@@ -64,10 +67,10 @@ class LineChart {
     const tMin = tMax - this.windowSec;
 
     // 背景與格線
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = "#0b1220";
     ctx.fillRect(this.padL, this.padT, pw, ph);
-    ctx.strokeStyle = "#e8e8ed"; ctx.lineWidth = 1;
-    ctx.fillStyle = "#6e6e73"; ctx.font = "11px Consolas, monospace";
+    ctx.strokeStyle = "#1e293b"; ctx.lineWidth = 1;
+    ctx.fillStyle = "#64748b"; ctx.font = "11px Consolas, monospace";
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
 
     if (!hasData) {
