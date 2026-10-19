@@ -24,7 +24,18 @@
           <option value="keithley">Keithley 2400</option>
         </select>
       </div>
-      <div class="row">
+      <div class="row" id="connModeRow" hidden>
+        <label>連接方式</label>
+        <select id="connModeSel">
+          <option value="serial" selected>RS-232 直連</option>
+          <option value="gpib">GPIB 橋接</option>
+        </select>
+      </div>
+      <div class="row" id="gpibRow" hidden>
+        <label>GPIB 位址</label>
+        <input type="text" id="gpibAddr" value="GPIB0::24::INSTR" spellcheck="false" style="flex:1;min-width:0">
+      </div>
+      <div class="row" id="baudRow">
         <label>鮑率</label>
         <select id="baudSel">
           <option value="9600">9600</option>
@@ -40,7 +51,7 @@
         <button id="btnDisconnect" disabled>斷開</button>
         <button id="btnForget" title="忘記已配對裝置，下次連接重新選擇">換裝置</button>
       </div>
-      <div class="hint">僅 Chrome / Edge 支援 Web Serial。頁面需經 HTTPS 開啟。斷開後不需重選，直接按「連接 COM」即可重連。Keithley 2400 請經 USB 轉 RS-232 線連接。</div>
+      <div class="hint" id="connHint">僅 Chrome / Edge 支援 Web Serial。頁面需經 HTTPS 開啟。斷開後不需重選，直接按「連接 COM」即可重連。</div>
     </section>
 
 <section class="card">

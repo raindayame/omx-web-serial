@@ -42,6 +42,7 @@ const S = {
   port: null, reader: null, writer: null, keepReading: false,
   connected: false,
   instrument: "esp32",
+  ws: null, kLink: "serial", rpcSeq: 0, rpcWait: {},
   channels: [], hasData: false,
   interval: 1, startTime: 0, lastRecordSec: 0,
   accum: {}, tempAcc: [], humdAcc: [],
@@ -105,6 +106,13 @@ async function esp32Setup(port, baudRate) {
 }
 
 async function connectSerial() {
+  if (S.instrument === "keithley" && $("connModeSel").value === "gpib") {
+    S.kLink = "gpib";
+    try { await connectGpib(); }
+    catch (e) { log(`連線失敗：${e.message}`); }
+    return;
+  }
+  S.kLink = "serial";
   if (!("serial" in navigator)) {
     log("此瀏覽器不支援 Web Serial，請改用 Chrome / Edge。");
     return;
@@ -140,6 +148,12 @@ async function disconnectSerial() {
   try { if (S.reader) await S.reader.cancel(); } catch {}
   try { if (S.writer) { S.writer.releaseLock(); } } catch {}
   try { if (S.port) await S.port.close(); } catch {}
+  // GPIB 橋接：送 close 並關 WebSocket（Output 已在上方經 SCPI 關閉）
+  if (S.kLink === "gpib" && S.ws) {
+    try { await gpibRpc({ type: "close" }, 2000); } catch {}
+    try { S.ws.close(); } catch {}
+    S.ws = null;
+  }
   // 保留 S.port：下次按連接可直接重開，不用再選一次
   S.reader = null; S.writer = null;
   S.connected = false;
@@ -148,12 +162,97 @@ async function disconnectSerial() {
 }
 
 async function forgetDevice() {
+  if (S.kLink === "gpib") { log("GPIB 橋接模式沒有 COM 埠可換。"); return; }
   try {
     const port = S.port || (await navigator.serial.getPorts())[0];
     if (port) { try { await port.forget(); } catch {} }
   } catch {}
   S.port = null;
   log("已忘記裝置，下次連接會重新跳出選擇器。");
+}
+
+/* ---------------- Keithley GPIB 橋接（NI GPIB-USB-HS 經本機 bridge.py） ----------------
+   Web Serial 看不到 NI-VISA 裝置，所以 GPIB 走 WebSocket → 本機 bridge.py → PyVISA。
+   SCPI 層（scpiWrite/scpiQuery/kHandleText）不變，只換傳輸通道。 */
+const GPIB_WS_URL = "ws://127.0.0.1:8765";
+function gpibOnMessage(ev) {
+  let msg;
+  try { msg = JSON.parse(ev.data); } catch { return; }
+  if (msg.rpc != null && S.rpcWait[msg.rpc]) {
+    const w = S.rpcWait[msg.rpc]; delete S.rpcWait[msg.rpc];
+    if (msg.type === "error") w.reject(new Error(msg.message || "橋接錯誤"));
+    else w.resolve(msg);
+    return;
+  }
+  if (msg.type === "data" && typeof msg.line === "string") {
+    kHandleText(msg.line + "\n"); // 走既有 SCPI 回應配對
+  } else if (msg.type === "error") {
+    log("GPIB 橋接錯誤：" + (msg.message || ""));
+    recordEvent("ERROR", msg.message || "bridge error");
+  }
+  // ack 無需處理
+}
+function gpibRpc(msg, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    if (!S.ws || S.ws.readyState !== WebSocket.OPEN) { reject(new Error("GPIB 橋接未連線")); return; }
+    const id = ++S.rpcSeq;
+    const timer = setTimeout(() => { delete S.rpcWait[id]; reject(new Error("橋接逾時")); }, timeoutMs);
+    S.rpcWait[id] = {
+      resolve: (m) => { clearTimeout(timer); delete S.rpcWait[id]; resolve(m); },
+      reject: (e) => { clearTimeout(timer); delete S.rpcWait[id]; reject(e); },
+    };
+    S.ws.send(JSON.stringify({ ...msg, rpc: id }));
+  });
+}
+// 兩種傳輸共用的 SCPI 初始化
+async function keithleyInitScpi() {
+  const idn = await scpiQuery("*IDN?");
+  recordEvent("IDN", idn);
+  if (!/2400/i.test(idn)) throw new Error("不是 Keithley 2400：" + idn);
+  const init = ["*RST", ":OUTP OFF", ":SOUR:FUNC VOLT", ":SOUR:VOLT:MODE FIXED",
+    ":SENS:FUNC 'CURR'", `:SENS:CURR:PROT ${S.k.comp}`, ":SENS:CURR:RANG:AUTO ON",
+    ":SENS:CURR:NPLC 1", ":FORM:DATA ASC", ":FORM:ELEM VOLT,CURR,STAT", ":SOUR:VOLT 0"];
+  for (const c of init) await scpiWrite(c);
+  const err = await scpiQuery(":SYST:ERR?");
+  if (!/^\s*\+?0[\s,]/.test(err)) throw new Error("儀器設定錯誤：" + err);
+  recordEvent("INIT", "SCPI 初始化完成");
+}
+async function connectGpib() {
+  S.kLink = "gpib";
+  const addr = ($("gpibAddr").value || "").trim() || "GPIB0::24::INSTR";
+  log("連接 GPIB 橋接（" + addr + "）…");
+  const ws = new WebSocket(GPIB_WS_URL);
+  S.ws = ws;
+  try {
+    await new Promise((resolve, reject) => {
+      const to = setTimeout(() => reject(new Error("連不上橋接程式：請先在本機執行 tools/keithley-gpib-bridge/bridge.py")), 4000);
+      ws.onopen = () => { clearTimeout(to); resolve(); };
+      ws.onerror = () => { clearTimeout(to); reject(new Error("連不上橋接程式：請先在本機執行 tools/keithley-gpib-bridge/bridge.py")); };
+    });
+    ws.onmessage = gpibOnMessage;
+    ws.onclose = () => {
+      S.ws = null;
+      if (S.connected && S.kLink === "gpib") { S.connected = false; updateConnUI(); log("GPIB 橋接中斷，已斷開。"); }
+    };
+    await gpibRpc({ type: "open", resource: addr });
+  } catch (e) {
+    try { ws.close(); } catch {}
+    S.ws = null; S.kLink = "serial";
+    throw e;
+  }
+  resetKeithleySession();
+  S.connected = true;
+  S.keepReading = true;
+  updateConnUI();
+  recordEvent("CONNECT", `Keithley 2400（GPIB ${addr}，經本機橋接）`);
+  try {
+    await keithleyInitScpi();
+    log("Keithley 2400 就緒（GPIB）：設定電壓後按「Output ON」開始量測。");
+  } catch (e) {
+    log("Keithley 初始化失敗：" + e.message);
+    recordEvent("ERROR", e.message);
+    await disconnectSerial();
+  }
 }
 
 /* ---------------- Keithley 2400 SCPI ---------------- */
@@ -220,18 +319,9 @@ async function keithleySetup(port, baudRate) {
   S.keepReading = true;
   updateConnUI();
   readLoop(); // SCPI 回應經 handleText → kHandleText
-  recordEvent("CONNECT", `Keithley 2400（${baudRate} baud, RS-232）`);
+  recordEvent("CONNECT", `Keithley 2400（${baudRate} baud, RS-232 直連）`);
   try {
-    const idn = await scpiQuery("*IDN?");
-    recordEvent("IDN", idn);
-    if (!/2400/i.test(idn)) throw new Error("不是 Keithley 2400：" + idn);
-    const init = ["*RST", ":OUTP OFF", ":SOUR:FUNC VOLT", ":SOUR:VOLT:MODE FIXED",
-      ":SENS:FUNC 'CURR'", `:SENS:CURR:PROT ${S.k.comp}`, ":SENS:CURR:RANG:AUTO ON",
-      ":SENS:CURR:NPLC 1", ":FORM:DATA ASC", ":FORM:ELEM VOLT,CURR,STAT", ":SOUR:VOLT 0"];
-    for (const c of init) await scpiWrite(c);
-    const err = await scpiQuery(":SYST:ERR?");
-    if (!/^\s*\+?0[\s,]/.test(err)) throw new Error("儀器設定錯誤：" + err);
-    recordEvent("INIT", "SCPI 初始化完成");
+    await keithleyInitScpi();
     log("Keithley 2400 就緒：設定電壓後按「Output ON」開始量測。");
   } catch (e) {
     log("Keithley 初始化失敗：" + e.message);
@@ -407,6 +497,11 @@ async function readLoop() {
 }
 
 async function writeLine(text) {
+  if (S.kLink === "gpib") {
+    if (!S.ws || S.ws.readyState !== WebSocket.OPEN) throw new Error("GPIB 橋接未連線");
+    S.ws.send(JSON.stringify({ type: "line", cmd: text.trim() }));
+    return;
+  }
   if (!S.writer) throw new Error("尚未連線");
   await S.writer.write(new TextEncoder().encode(text));
 }
@@ -636,11 +731,30 @@ function applyInstrumentUI(mode) {
     sel.appendChild(o);
   }
   sel.value = mode === "keithley" ? "9600" : "115200";
+  $("connModeRow").hidden = mode !== "keithley";
+  updateConnModeUI();
   $("kCard").hidden = mode !== "keithley";
   $("adcCard").hidden = mode === "keithley";
   $("envCard").hidden = mode === "keithley";
   $("measCard").hidden = mode === "keithley";
   $("chartTitle").textContent = mode === "keithley" ? "即時監控圖 — 電阻 (Ω)" : "即時監控圖 — 電阻 (kΩ)";
+}
+// 依連接方式顯示／隱藏 GPIB 位址列、鮑率列，並更新提示文字
+function updateConnModeUI() {
+  const isK = S.instrument === "keithley";
+  const gpib = isK && $("connModeSel").value === "gpib";
+  $("gpibRow").hidden = !gpib;
+  $("baudRow").hidden = gpib;
+  $("btnForget").disabled = gpib;
+  $("btnConnect").textContent = !isK ? "連接 COM" : (gpib ? "連接 GPIB" : "連接");
+  const hint = $("connHint");
+  if (!isK) {
+    hint.textContent = "僅 Chrome / Edge 支援 Web Serial。頁面需經 HTTPS 開啟。斷開後不需重選，直接按「連接 COM」即可重連。";
+  } else if (gpib) {
+    hint.textContent = "GPIB 模式：請先在本機執行 tools/keithley-gpib-bridge/bridge.py（需 Python＋pyvisa＋NI-VISA 驅動），再按「連接 GPIB」。NI GPIB-USB-HS 不會出現在瀏覽器 COM 選單中，這是正常的。";
+  } else {
+    hint.textContent = "RS-232 直連：請用 USB 轉 RS-232 線接儀器背板 RS-232 孔，儀器面板切到 RS-232（MENU → COMMUNICATION）。斷開後不需重選，直接按「連接」即可重連。";
+  }
 }
 async function setInstrument(mode) {
   if (mode !== "esp32" && mode !== "keithley") return;
@@ -653,7 +767,7 @@ async function setInstrument(mode) {
     : (mode === "keithley" ? "9600" : "115200");
   saveSettings();
   log(mode === "keithley"
-    ? "已切換為 Keithley 2400 模式（經 RS-232，預設 9600 baud）。"
+    ? "已切換為 Keithley 2400 模式（連接方式：RS-232 直連／GPIB 橋接）。"
     : "已切換為 ESP32 模式（預設 115200 baud）。");
 }
 
@@ -755,7 +869,7 @@ async function kExportExcel() {
     const rep = wb.addWorksheet("Report");
     rep.getCell("A1").value = "Gas Sensor Measurement Report";
     rep.getCell("A1").font = { size: 18, bold: true, color: { argb: "FF164B70" } };
-    rep.getCell("A2").value = "Keithley 2400（Web Serial / RS-232）";
+    rep.getCell("A2").value = "Keithley 2400（" + (S.kLink === "gpib" ? "GPIB 橋接" : "Web Serial / RS-232") + "）";
     rep.getCell("A3").value =
       `Samples: ${S.k.samples.length} | Baselines: ${S.k.baselines.length} | 匯出時間：${new Date().toLocaleString("zh-TW", { hour12: false })}`;
     try {
@@ -785,7 +899,7 @@ async function kExportExcel() {
     const wsum = wb.addWorksheet("Summary");
     const valid = S.k.samples.filter((s) => s.valid).length;
     [["Parameter", "Value"],
-     ["Instrument", "Keithley 2400 (RS-232 / Web Serial)"],
+     ["Instrument", "Keithley 2400 (" + (S.kLink === "gpib" ? "GPIB bridge" : "RS-232 / Web Serial") + ")"],
      ["Samples", S.k.samples.length],
      ["Valid samples", valid],
      ["Baselines", S.k.baselines.length],
@@ -897,6 +1011,8 @@ function bindEvents() {
     saveSettings();
   };
   $("baudSel").onchange = saveSettings;
+  $("connModeSel").onchange = () => { updateConnModeUI(); saveSettings(); };
+  $("gpibAddr").onchange = saveSettings;
 
   $("btnCalSend").onclick = async () => {
     try {
@@ -973,9 +1089,9 @@ function bindEvents() {
   }
 
   window.addEventListener("beforeunload", () => {
-    // Keithley 安全：盡力關閉 Output（同步寫入，不等待回應）
+    // Keithley 安全：盡力關閉 Output（不等待回應；GPIB 經 WebSocket 同步送出）
     if (S.instrument === "keithley" && S.connected && S.k.outputOn) {
-      try { S.writer.write(new TextEncoder().encode(":OUTP OFF\n")); } catch {}
+      try { writeLine(":OUTP OFF\n").catch(() => {}); } catch {}
     }
     if (S.recording && S.recResRows.length) {
       downloadCSV(`gas_resistance_${stamp()}.csv`, S.recResRows);
@@ -997,6 +1113,7 @@ function saveSettings() {
   c["baud_" + S.instrument] = $("baudSel").value;
   c.interval = S.interval; c.adc = S.adc; c.rules = S.rules;
   c.segMs = S.segMs; c.instrument = S.instrument; c.kVolt = S.k.vSet; c.kComp = S.k.comp;
+  c.kLink = $("connModeSel").value; c.gpibAddr = $("gpibAddr").value;
   store.save(c);
 }
 function loadSettings() {
@@ -1010,6 +1127,9 @@ function loadSettings() {
   if (c.baud && BAUDS[S.instrument].includes(c.baud)) $("baudSel").value = c.baud;
   const savedBaud = c["baud_" + S.instrument];
   if (savedBaud && BAUDS[S.instrument].includes(savedBaud)) $("baudSel").value = savedBaud;
+  if (c.kLink === "gpib" || c.kLink === "serial") $("connModeSel").value = c.kLink;
+  if (typeof c.gpibAddr === "string" && c.gpibAddr) $("gpibAddr").value = c.gpibAddr;
+  updateConnModeUI();
   if (Number.isFinite(c.kVolt) && c.kVolt >= 0 && c.kVolt <= 5) {
     S.k.vSet = c.kVolt; $("kVolt").value = c.kVolt;
   }
