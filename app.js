@@ -1442,5 +1442,7 @@ drawTimer();
 if (!("serial" in navigator)) {
   log("提醒：此瀏覽器不支援 Web Serial API，請使用 Chrome / Edge 開啟本頁。");
 } else {
-  log("就緒。按下「連接 COM」並選擇 ESP32 序列埠即可開始量測。");
+  const instName = S.instrument === "keithley" ? "Keithley 2400"
+    : S.instrument === "agilent" ? "Agilent 34401A" : "ESP32";
+  log(`就緒。目前儀器為 ${instName}，按下「${$("btnConnect").textContent}」即可開始量測。`);
 }
