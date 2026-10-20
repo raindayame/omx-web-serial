@@ -55,12 +55,12 @@ const S = {
   dirHandle: null, segMs: 0, segStart: 0, segBusy: false, segFileHandle: null,
   events: [],
   k: {
-    vSet: 1.0, comp: 0.1, outputOn: false, paused: false,
+    vSet: 1.0, comp: 0.1, outputOn: false, paused: false, ready: false,
     buf: "", pending: null, loopRunning: false,
     samples: [], baselines: [],
   },
   a: {
-    func: "VOLT:DC", range: "AUTO", nplc: "10",
+    func: "VOLT:DC", range: "AUTO", nplc: "10", ready: false,
     measuring: false, loopRunning: false, samples: [], last: NaN,
   },
   adc: [3.28, 3.27, 3.27, 3.28],
@@ -256,9 +256,11 @@ async function connectGpib() {
   try {
     if (isA) {
       await agilentInitScpi();
+      S.a.ready = true;
       log("Agilent 34401A 就緒（GPIB）：按「開始量測」開始記錄。");
     } else {
       await keithleyInitScpi();
+      S.k.ready = true;
       log("Keithley 2400 就緒（GPIB）：設定電壓後按「Output ON」開始量測。");
     }
   } catch (e) {
@@ -305,7 +307,7 @@ function kHandleText(chunk) {
 
 function resetKeithleySession() {
   Object.assign(S.k, {
-    buf: "", pending: null, paused: false, outputOn: false, loopRunning: false,
+    buf: "", pending: null, paused: false, outputOn: false, loopRunning: false, ready: false,
     samples: [], baselines: [],
   });
   S.events = [];
@@ -338,6 +340,7 @@ async function keithleySetup(port, baudRate) {
   recordEvent("CONNECT", `Keithley 2400（${baudRate} baud, RS-232 直連）`);
   try {
     await keithleyInitScpi();
+    S.k.ready = true;
     log("Keithley 2400 就緒：設定電壓後按「Output ON」開始量測。");
   } catch (e) {
     log("Keithley 初始化失敗：" + e.message);
@@ -446,6 +449,7 @@ async function kApplyCompliance() {
 
 async function kToggleOutput() {
   if (!S.connected || S.instrument !== "keithley") { log("請先連接 Keithley 2400。"); return; }
+  if (!S.k.ready) { log("儀器尚未就緒：初始化未完成，請等連線成功（出現「就緒」）後再操作。"); return; }
   try {
     if (!S.k.outputOn) {
       await scpiWrite(`:SOUR:VOLT ${S.k.vSet}`);
@@ -529,7 +533,7 @@ async function agilentInitScpi() {
   recordEvent("INIT", "SCPI 初始化完成");
 }
 function resetAgilentSession() {
-  Object.assign(S.a, { measuring: false, loopRunning: false, samples: [], last: NaN });
+  Object.assign(S.a, { measuring: false, loopRunning: false, samples: [], last: NaN, ready: false });
   S.events = [];
   S.channels = ["A34401A"];
   S.hasData = true;
@@ -558,6 +562,7 @@ async function agilentSetup(port, baudRate) {
   recordEvent("CONNECT", `Agilent 34401A（${baudRate} baud, RS-232 直連）`);
   try {
     await agilentInitScpi();
+    S.a.ready = true;
     log("Agilent 34401A 就緒：按「開始量測」開始記錄。");
   } catch (e) {
     log("Agilent 初始化失敗：" + e.message);
@@ -617,6 +622,7 @@ function aUpdateLive(v) {
 }
 async function aToggleMeasure() {
   if (!S.connected || S.instrument !== "agilent") { log("請先連接 Agilent 34401A。"); return; }
+  if (!S.a.ready) { log("儀器尚未就緒：初始化未完成，請等連線成功（出現「就緒」）後再操作。"); return; }
   if (!S.a.measuring) {
     try { await agilentApplyConfig(); }
     catch (e) { log("套用設定失敗：" + e.message); return; }
@@ -636,6 +642,7 @@ async function aToggleMeasure() {
 }
 async function aApplyUi() {
   if (!S.connected || S.instrument !== "agilent") { log("請先連接 Agilent 34401A。"); return; }
+  if (!S.a.ready) { log("儀器尚未就緒：初始化未完成，請等連線成功（出現「就緒」）後再操作。"); return; }
   try {
     await agilentApplyConfig();
     log("設定已套用。");
@@ -1201,21 +1208,21 @@ function bindEvents() {
     aBuildRanges();
     saveSettings();
     aUpdateLive(S.a.last);
-    if (S.connected && S.instrument === "agilent") {
+    if (S.connected && S.instrument === "agilent" && S.a.ready) {
       try { await agilentApplyConfig(); } catch (err) { log("套用設定失敗：" + err.message); }
     }
   };
   $("aRange").onchange = async (e) => {
     S.a.range = e.target.value;
     saveSettings();
-    if (S.connected && S.instrument === "agilent") {
+    if (S.connected && S.instrument === "agilent" && S.a.ready) {
       try { await agilentApplyConfig(); } catch (err) { log("套用設定失敗：" + err.message); }
     }
   };
   $("aNplc").onchange = async (e) => {
     S.a.nplc = e.target.value;
     saveSettings();
-    if (S.connected && S.instrument === "agilent") {
+    if (S.connected && S.instrument === "agilent" && S.a.ready) {
       try { await agilentApplyConfig(); } catch (err) { log("套用設定失敗：" + err.message); }
     }
   };
