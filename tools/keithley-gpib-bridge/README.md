@@ -7,8 +7,8 @@
 
 這支 `bridge.py` 跑在你的電腦上：經 PyVISA＋NI-VISA 驅動 GPIB，
 再用 WebSocket（`ws://127.0.0.1:8765`）把 SCPI 指令／回應轉給網頁。
-網頁 Keithley 模式選「GPIB 橋接」後，所有操作（Output ON/OFF、讀值、
-CSV 匯出等）都跟 RS-232 直連時一模一樣。
+bridge 本身只做 SCPI 轉發、不綁儀器型號：Keithley 2400 與 Agilent 34401A
+的網頁模式選「GPIB 橋接」後，所有操作都跟 RS-232 直連時一模一樣。
 
 ## 安裝（只需做一次）
 
@@ -27,7 +27,7 @@ python bridge.py
 
 ## 找 GPIB 位址
 
-- 預設 `GPIB0::24::INSTR`（Keithley 2400 出廠預設位址 24）。
+- 預設 `GPIB0::24::INSTR`（Keithley 2400 出廠預設位址 24；Agilent 34401A 出廠預設 22）。
 - 若改過儀器位址，用 NI MAX 查，或在網頁連接前先確認。
 - 也可用 `python -c "import pyvisa; print(pyvisa.ResourceManager().list_resources())"` 列出。
 

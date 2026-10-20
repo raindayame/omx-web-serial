@@ -59,6 +59,10 @@ const S = {
     buf: "", pending: null, loopRunning: false,
     samples: [], baselines: [],
   },
+  a: {
+    func: "VOLT:DC", range: "AUTO", nplc: "10",
+    measuring: false, loopRunning: false, samples: [], last: NaN,
+  },
   adc: [3.28, 3.27, 3.27, 3.28],
   rules: {
     resistance: { enabled: false, min: 0, max: 1000 },
@@ -106,7 +110,7 @@ async function esp32Setup(port, baudRate) {
 }
 
 async function connectSerial() {
-  if (S.instrument === "keithley" && $("connModeSel").value === "gpib") {
+  if (S.instrument !== "esp32" && $("connModeSel").value === "gpib") {
     S.kLink = "gpib";
     try { await connectGpib(); }
     catch (e) { log(`連線失敗：${e.message}`); }
@@ -121,6 +125,7 @@ async function connectSerial() {
   try {
     const port = await acquirePort(baudRate);
     if (S.instrument === "keithley") await keithleySetup(port, baudRate);
+    else if (S.instrument === "agilent") await agilentSetup(port, baudRate);
     else await esp32Setup(port, baudRate);
   } catch (e) {
     if (e.name !== "NotFoundError") log(`連線失敗：${e.message}`);
@@ -129,6 +134,7 @@ async function connectSerial() {
 
 async function disconnectSerial() {
   S.keepReading = false;
+  if (S.instrument === "agilent") S.a.measuring = false;
   // Keithley：先關 Output 並驗證（安全）
   if (S.instrument === "keithley" && S.connected && S.k.outputOn) {
     try {
@@ -219,7 +225,9 @@ async function keithleyInitScpi() {
 }
 async function connectGpib() {
   S.kLink = "gpib";
-  const addr = ($("gpibAddr").value || "").trim() || "GPIB0::24::INSTR";
+  const isA = S.instrument === "agilent";
+  const name = isA ? "Agilent 34401A" : "Keithley 2400";
+  const addr = ($("gpibAddr").value || "").trim() || GPIB_DEFAULTS[S.instrument] || "GPIB0::24::INSTR";
   log("連接 GPIB 橋接（" + addr + "）…");
   const ws = new WebSocket(GPIB_WS_URL);
   S.ws = ws;
@@ -240,16 +248,21 @@ async function connectGpib() {
     S.ws = null; S.kLink = "serial";
     throw e;
   }
-  resetKeithleySession();
+  if (isA) resetAgilentSession(); else resetKeithleySession();
   S.connected = true;
   S.keepReading = true;
   updateConnUI();
-  recordEvent("CONNECT", `Keithley 2400（GPIB ${addr}，經本機橋接）`);
+  recordEvent("CONNECT", `${name}（GPIB ${addr}，經本機橋接）`);
   try {
-    await keithleyInitScpi();
-    log("Keithley 2400 就緒（GPIB）：設定電壓後按「Output ON」開始量測。");
+    if (isA) {
+      await agilentInitScpi();
+      log("Agilent 34401A 就緒（GPIB）：按「開始量測」開始記錄。");
+    } else {
+      await keithleyInitScpi();
+      log("Keithley 2400 就緒（GPIB）：設定電壓後按「Output ON」開始量測。");
+    }
   } catch (e) {
-    log("Keithley 初始化失敗：" + e.message);
+    log(name + "初始化失敗：" + e.message);
     recordEvent("ERROR", e.message);
     await disconnectSerial();
   }
@@ -481,6 +494,192 @@ function kSetBase() {
   log(`設置 Rair 成功：R0=${r0.toExponential(4)} Ω。`);
 }
 
+/* ---------------- Agilent 34401A SCPI（純量測 DMM） ----------------
+   傳輸與 SCPI 層（scpiWrite/scpiQuery/kHandleText）與 Keithley 共用。
+   34401A 無輸出端子，量測流程：CONF 設定 → READ? 輪詢。 */
+function aBuildRanges() {
+  const sel = $("aRange");
+  sel.innerHTML = "";
+  for (const r of AGILENT_FUNCS[S.a.func].ranges) {
+    const o = document.createElement("option");
+    o.value = r; o.textContent = r === "AUTO" ? "AUTO" : r;
+    sel.appendChild(o);
+  }
+  if (!AGILENT_FUNCS[S.a.func].ranges.includes(S.a.range)) S.a.range = "AUTO";
+  sel.value = S.a.range;
+}
+async function agilentApplyConfig() {
+  await scpiWrite(`CONF:${S.a.func} ${S.a.range}`);
+  await scpiWrite(`${S.a.func}:NPLC ${S.a.nplc}`);
+  recordEvent("ACONF", `${AGILENT_FUNCS[S.a.func].label} range=${S.a.range} NPLC=${S.a.nplc}`);
+}
+// 兩種傳輸共用的 SCPI 初始化
+async function agilentInitScpi() {
+  const idn = await scpiQuery("*IDN?");
+  recordEvent("IDN", idn);
+  if (!/34401A/i.test(idn)) throw new Error("不是 Agilent 34401A：" + idn);
+  await scpiWrite("*RST");
+  await new Promise((r) => setTimeout(r, 600));
+  await agilentApplyConfig();
+  const err = await scpiQuery(":SYST:ERR?");
+  if (!/^\s*\+?0[\s,]/.test(err)) throw new Error("儀器設定錯誤：" + err);
+  recordEvent("INIT", "SCPI 初始化完成");
+}
+function resetAgilentSession() {
+  Object.assign(S.a, { measuring: false, loopRunning: false, samples: [], last: NaN });
+  S.events = [];
+  S.channels = ["A34401A"];
+  S.hasData = true;
+  S.csvRows = [];
+  S.startTime = performance.now(); S.lastRecordSec = 0;
+  S.segStart = performance.now(); S.segFileHandle = null;
+  S.timeBuf = []; S.dataBuf = { A34401A: [] }; S.sensBuf = { A34401A: [] };
+  S.tempBuf = []; S.humdBuf = [];
+  mainChart.clear();
+  mainChart.setSeries("A34401A", "#a78bfa");
+  $("chartTitle").textContent = "即時監控圖 — Agilent 34401A";
+  renderChannelGrid();
+  $("chartInfo").textContent = "等待量測…";
+  $("btnAMeasure").textContent = "開始量測";
+  $("btnAMeasure").classList.remove("danger");
+  aUpdateLive(NaN);
+}
+async function agilentSetup(port, baudRate) {
+  S.port = port;
+  S.writer = port.writable.getWriter();
+  resetAgilentSession();
+  S.connected = true;
+  S.keepReading = true;
+  updateConnUI();
+  readLoop(); // SCPI 回應經 handleText → kHandleText
+  recordEvent("CONNECT", `Agilent 34401A（${baudRate} baud, RS-232 直連）`);
+  try {
+    await agilentInitScpi();
+    log("Agilent 34401A 就緒：按「開始量測」開始記錄。");
+  } catch (e) {
+    log("Agilent 初始化失敗：" + e.message);
+    recordEvent("ERROR", e.message);
+    await disconnectSerial();
+  }
+}
+// 量測迴圈：measuring 時輪詢 :READ?（逾時給長：NPLC 100 約需 1.7 秒/點）
+async function agilentLoop() {
+  if (S.a.loopRunning) return;
+  S.a.loopRunning = true;
+  try {
+    while (S.keepReading && S.instrument === "agilent" && S.a.measuring) {
+      try {
+        aHandleReading(await scpiQuery(":READ?", 10000));
+      } catch (e) {
+        if (S.keepReading) log("讀取失敗：" + e.message);
+      }
+      await new Promise((r) => setTimeout(r, Math.max(400, S.interval * 1000)));
+    }
+  } finally {
+    S.a.loopRunning = false;
+  }
+}
+function aHandleReading(resp) {
+  const v = parseFloat(resp);
+  const info = AGILENT_FUNCS[S.a.func];
+  const elapsed = Math.round((performance.now() - S.startTime) / 1000);
+  const valid = Number.isFinite(v);
+  const sample = { t: new Date(), elapsed, value: v, func: info.label, unit: info.unit, valid };
+  S.a.samples.push(sample);
+  if (!valid) { recordEvent("READ_ERROR", "格式異常：" + resp); return; }
+  S.a.last = v;
+  pushBuf(S.timeBuf, elapsed);
+  pushBuf(S.dataBuf["A34401A"], v);
+  mainChart.push("A34401A", elapsed, v);
+  mainChart.draw(elapsed, `${info.label} (${info.unit})`, null);
+  S.csvRows.push([elapsed, info.label, v.toExponential(6), info.unit]);
+  aUpdateLive(v);
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
+  const ss = String(elapsed % 60).padStart(2, "0");
+  $("chartInfo").textContent =
+    `已記錄 ${S.timeBuf.length} 點 · 經過 ${mm}:${ss} · Agilent 34401A ${info.label}`;
+}
+function aUpdateLive(v) {
+  const info = AGILENT_FUNCS[S.a.func];
+  const disp = Number.isFinite(v) ? v.toPrecision(7) : "--";
+  $("aVal").textContent = disp;
+  $("aUnit").textContent = info.unit;
+  $("aFuncLabel").textContent = info.label;
+  const el = document.querySelector('[data-ch="A34401A"]');
+  if (el) {
+    el.querySelector(".ch-val").textContent = disp;
+    el.querySelector(".ch-unit").textContent = info.unit;
+  }
+  refreshSparks();
+}
+async function aToggleMeasure() {
+  if (!S.connected || S.instrument !== "agilent") { log("請先連接 Agilent 34401A。"); return; }
+  if (!S.a.measuring) {
+    try { await agilentApplyConfig(); }
+    catch (e) { log("套用設定失敗：" + e.message); return; }
+    S.a.measuring = true;
+    S.startTime = performance.now();
+    S.segStart = performance.now();
+    recordEvent("MEASURE", `開始（${AGILENT_FUNCS[S.a.func].label} range=${S.a.range} NPLC=${S.a.nplc}）`);
+    $("btnAMeasure").textContent = "停止量測";
+    $("btnAMeasure").classList.add("danger");
+    agilentLoop();
+  } else {
+    S.a.measuring = false;
+    recordEvent("MEASURE", "停止");
+    $("btnAMeasure").textContent = "開始量測";
+    $("btnAMeasure").classList.remove("danger");
+  }
+}
+async function aApplyUi() {
+  if (!S.connected || S.instrument !== "agilent") { log("請先連接 Agilent 34401A。"); return; }
+  try {
+    await agilentApplyConfig();
+    log("設定已套用。");
+  } catch (e) { log("套用設定失敗：" + e.message); }
+}
+async function aExportExcel() {
+  if (!S.a.samples.length) { log("無資料可匯出。"); return; }
+  try {
+    await ensureExcelJS();
+    const info = AGILENT_FUNCS[S.a.func];
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "OMX Web Serial";
+    wb.created = new Date();
+    const rep = wb.addWorksheet("Report");
+    rep.getCell("A1").value = "Agilent 34401A Measurement Report";
+    rep.getCell("A1").font = { size: 18, bold: true, color: { argb: "FF164B70" } };
+    rep.getCell("A2").value = "Agilent 34401A（" + (S.kLink === "gpib" ? "GPIB 橋接" : "RS-232 直連") + "）";
+    rep.getCell("A3").value =
+      `Samples: ${S.a.samples.length} | Function: ${info.label} | 匯出時間：${new Date().toLocaleString("zh-TW", { hour12: false })}`;
+    try {
+      const png = $("mainChart").toDataURL("image/png").split(",")[1];
+      const imgId = wb.addImage({ base64: png, extension: "png" });
+      rep.addImage(imgId, "A5:H28");
+    } catch (e) { rep.getCell("A5").value = "圖表擷取失敗：" + e.message; }
+    const ws = wb.addWorksheet("Data");
+    ws.addRow(["Time(s)", "Function", "Reading", "Unit", "DateTime"]);
+    for (const s of S.a.samples) ws.addRow(
+      [s.elapsed, s.func, s.valid ? s.value : "", s.unit,
+       s.t.toLocaleString("zh-TW", { hour12: false })]);
+    const we = wb.addWorksheet("Events");
+    we.addRow(["DateTime", "Type", "Message"]);
+    for (const e of S.events) we.addRow(
+      [e.t.toLocaleString("zh-TW", { hour12: false }), e.kind, e.msg]);
+    const buf = await wb.xlsx.writeBuffer();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([buf], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }));
+    a.download = `agilent34401a_${stamp()}.xlsx`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    recordEvent("EXPORT", "Excel 已匯出（" + S.a.samples.length + " 筆）。");
+  } catch (e) {
+    log("Excel 匯出失敗：" + e.message);
+  }
+}
+
 async function readLoop() {
   const decoder = new TextDecoderStream();
   S.port.readable.pipeTo(decoder.writable).catch(() => {});
@@ -507,7 +706,8 @@ async function writeLine(text) {
 }
 
 function handleText(chunk) {
-  if (S.instrument === "keithley") { kHandleText(chunk); return; }
+  // SCPI 儀器（Keithley / Agilent）共用行協定配對
+  if (S.instrument === "keithley" || S.instrument === "agilent") { kHandleText(chunk); return; }
   S.lineBuf += chunk;
   let idx;
   while ((idx = S.lineBuf.indexOf("\n")) >= 0) {
@@ -721,6 +921,16 @@ function resetSession() {
 const BAUDS = {
   esp32: ["9600", "115200"],
   keithley: ["9600", "19200", "38400", "57600"],
+  agilent: ["9600", "19200"],
+};
+// GPIB 位址預設（Keithley 2400 出廠 24；Agilent 34401A 出廠 22）
+const GPIB_DEFAULTS = { keithley: "GPIB0::24::INSTR", agilent: "GPIB0::22::INSTR" };
+// Agilent 34401A 量測功能與檔位
+const AGILENT_FUNCS = {
+  "VOLT:DC": { label: "DCV", unit: "V", ranges: ["AUTO", "0.1", "1", "10", "100", "1000"] },
+  "CURR:DC": { label: "DCI", unit: "A", ranges: ["AUTO", "0.01", "0.1", "1", "3"] },
+  "RES":     { label: "2WΩ", unit: "Ω", ranges: ["AUTO", "100", "1e3", "1e4", "1e5", "1e6", "1e7", "1e8"] },
+  "FRES":    { label: "4WΩ", unit: "Ω", ranges: ["AUTO", "100", "1e3", "1e4", "1e5", "1e6", "1e7", "1e8"] },
 };
 function applyInstrumentUI(mode) {
   const sel = $("baudSel");
@@ -730,44 +940,61 @@ function applyInstrumentUI(mode) {
     o.value = b; o.textContent = b;
     sel.appendChild(o);
   }
-  sel.value = mode === "keithley" ? "9600" : "115200";
-  $("connModeRow").hidden = mode !== "keithley";
+  sel.value = mode === "esp32" ? "115200" : "9600";
+  const isScpi = mode !== "esp32";
+  $("connModeRow").hidden = !isScpi;
   updateConnModeUI();
   $("kCard").hidden = mode !== "keithley";
-  $("adcCard").hidden = mode === "keithley";
-  $("envCard").hidden = mode === "keithley";
-  $("measCard").hidden = mode === "keithley";
-  $("chartTitle").textContent = mode === "keithley" ? "即時監控圖 — 電阻 (Ω)" : "即時監控圖 — 電阻 (kΩ)";
+  $("aCard").hidden = mode !== "agilent";
+  $("adcCard").hidden = isScpi;
+  $("envCard").hidden = isScpi;
+  $("measCard").hidden = isScpi;
+  $("chartTitle").textContent =
+    mode === "keithley" ? "即時監控圖 — 電阻 (Ω)" :
+    mode === "agilent" ? "即時監控圖 — Agilent 34401A" : "即時監控圖 — 電阻 (kΩ)";
+  // GPIB 位址依儀器帶入（各自保存，否則用出廠預設）
+  const c = store.load();
+  // 一次性遷移：舊版只有全域 gpibAddr，那只能是 Keithley 的
+  if (c.gpibAddr && !c["gpibAddr_keithley"] && !c["gpibAddr_agilent"]) {
+    c["gpibAddr_keithley"] = c.gpibAddr;
+    store.save(c);
+  }
+  $("gpibAddr").value = c["gpibAddr_" + mode] || GPIB_DEFAULTS[mode] || "";
 }
 // 依連接方式顯示／隱藏 GPIB 位址列、鮑率列，並更新提示文字
 function updateConnModeUI() {
-  const isK = S.instrument === "keithley";
-  const gpib = isK && $("connModeSel").value === "gpib";
+  const isScpi = S.instrument !== "esp32";
+  const gpib = isScpi && $("connModeSel").value === "gpib";
   $("gpibRow").hidden = !gpib;
   $("baudRow").hidden = gpib;
   $("btnForget").disabled = gpib;
-  $("btnConnect").textContent = !isK ? "連接 COM" : (gpib ? "連接 GPIB" : "連接");
+  $("btnConnect").textContent = !isScpi ? "連接 COM" : (gpib ? "連接 GPIB" : "連接");
   const hint = $("connHint");
-  if (!isK) {
+  if (!isScpi) {
     hint.textContent = "僅 Chrome / Edge 支援 Web Serial。頁面需經 HTTPS 開啟。斷開後不需重選，直接按「連接 COM」即可重連。";
   } else if (gpib) {
-    hint.textContent = "GPIB 模式：先啟動本機橋接程式再按「連接 GPIB」。可按「啟動橋接」按鈕（需先執行一次 install_protocol.bat 註冊協定），或設開機自動啟動。NI GPIB-USB-HS 不會出現在瀏覽器 COM 選單中，這是正常的。";
+    hint.textContent = "GPIB 模式：先啟動本機橋接程式再按「連接 GPIB」。可按「啟動橋接」按鈕（需先執行一次 install_protocol.bat 註冊協定），或設開機自動啟動。橋接程式為通用 SCPI 轉發，Keithley 2400 與 Agilent 34401A 皆可用。NI GPIB-USB-HS 不會出現在瀏覽器 COM 選單中，這是正常的。";
+  } else if (S.instrument === "agilent") {
+    hint.textContent = "RS-232 直連：請用 USB 轉 RS-232 線接 34401A 背板 RS-232 孔，儀器介面設為 RS-232（Utility → I/O），鮑率預設 9600。斷開後不需重選，直接按「連接」即可重連。";
   } else {
     hint.textContent = "RS-232 直連：請用 USB 轉 RS-232 線接儀器背板 RS-232 孔，儀器面板切到 RS-232（MENU → COMMUNICATION）。斷開後不需重選，直接按「連接」即可重連。";
   }
 }
 async function setInstrument(mode) {
-  if (mode !== "esp32" && mode !== "keithley") return;
+  if (mode !== "esp32" && mode !== "keithley" && mode !== "agilent") return;
   if (S.connected) await disconnectSerial();
   S.instrument = mode;
   applyInstrumentUI(mode);
   const c = store.load();
   const saved = c["baud_" + mode];
   $("baudSel").value = (saved && BAUDS[mode].includes(saved)) ? saved
-    : (mode === "keithley" ? "9600" : "115200");
+    : (mode === "esp32" ? "115200" : "9600");
+  if (mode === "agilent") aBuildRanges();
   saveSettings();
   log(mode === "keithley"
     ? "已切換為 Keithley 2400 模式（連接方式：RS-232 直連／GPIB 橋接）。"
+    : mode === "agilent"
+    ? "已切換為 Agilent 34401A 模式（連接方式：RS-232 直連／GPIB 橋接）。"
     : "已切換為 ESP32 模式（預設 115200 baud）。");
 }
 
@@ -776,6 +1003,9 @@ function csvHeader() {
   if (S.instrument === "keithley") {
     return ["Time(s)", "V_set(V)", "V_meas(V)", "I_meas(A)", "R(Ohm)", "R0(Ohm)",
       "R0/R", "R/R0", "dR_R0(%)", "dR_R(%)", "Compliance"];
+  }
+  if (S.instrument === "agilent") {
+    return ["Time(s)", "Function", "Reading", "Unit"];
   }
   return ["Time(s)", ...S.channels, "TEMP", "HUMD"];
 }
@@ -962,6 +1192,34 @@ function bindEvents() {
   $("btnKBase").onclick = kSetBase;
   $("btnKExcel").onclick = kExportExcel;
 
+  // Agilent 34401A 控制
+  $("aFunc").onchange = async (e) => {
+    S.a.func = e.target.value;
+    aBuildRanges();
+    saveSettings();
+    aUpdateLive(S.a.last);
+    if (S.connected && S.instrument === "agilent") {
+      try { await agilentApplyConfig(); } catch (err) { log("套用設定失敗：" + err.message); }
+    }
+  };
+  $("aRange").onchange = async (e) => {
+    S.a.range = e.target.value;
+    saveSettings();
+    if (S.connected && S.instrument === "agilent") {
+      try { await agilentApplyConfig(); } catch (err) { log("套用設定失敗：" + err.message); }
+    }
+  };
+  $("aNplc").onchange = async (e) => {
+    S.a.nplc = e.target.value;
+    saveSettings();
+    if (S.connected && S.instrument === "agilent") {
+      try { await agilentApplyConfig(); } catch (err) { log("套用設定失敗：" + err.message); }
+    }
+  };
+  $("btnAApply").onclick = aApplyUi;
+  $("btnAMeasure").onclick = aToggleMeasure;
+  $("btnAExcel").onclick = aExportExcel;
+
   // 實體拔線時自動更新連線狀態
   if ("serial" in navigator && navigator.serial.addEventListener) {
     navigator.serial.addEventListener("disconnect", () => {
@@ -1118,11 +1376,13 @@ function saveSettings() {
   c.interval = S.interval; c.adc = S.adc; c.rules = S.rules;
   c.segMs = S.segMs; c.instrument = S.instrument; c.kVolt = S.k.vSet; c.kComp = S.k.comp;
   c.kLink = $("connModeSel").value; c.gpibAddr = $("gpibAddr").value;
+  c["gpibAddr_" + S.instrument] = $("gpibAddr").value;
+  c.aFunc = S.a.func; c.aRange = S.a.range; c.aNplc = S.a.nplc;
   store.save(c);
 }
 function loadSettings() {
   const c = store.load();
-  if (c.instrument === "keithley" || c.instrument === "esp32") {
+  if (c.instrument === "keithley" || c.instrument === "esp32" || c.instrument === "agilent") {
     // 先套用儀器（會重建鮑率選項），再套用其他設定
     S.instrument = c.instrument;
     $("instSel").value = c.instrument;
@@ -1132,8 +1392,14 @@ function loadSettings() {
   const savedBaud = c["baud_" + S.instrument];
   if (savedBaud && BAUDS[S.instrument].includes(savedBaud)) $("baudSel").value = savedBaud;
   if (c.kLink === "gpib" || c.kLink === "serial") $("connModeSel").value = c.kLink;
-  if (typeof c.gpibAddr === "string" && c.gpibAddr) $("gpibAddr").value = c.gpibAddr;
   updateConnModeUI();
+  if (c.aFunc && AGILENT_FUNCS[c.aFunc]) { S.a.func = c.aFunc; $("aFunc").value = c.aFunc; }
+  aBuildRanges();
+  if (c.aRange && AGILENT_FUNCS[S.a.func].ranges.includes(c.aRange)) {
+    S.a.range = c.aRange; $("aRange").value = c.aRange;
+  }
+  if (c.aNplc) { S.a.nplc = c.aNplc; $("aNplc").value = c.aNplc; }
+  if (S.instrument === "agilent") aUpdateLive(NaN);
   if (Number.isFinite(c.kVolt) && c.kVolt >= 0 && c.kVolt <= 5) {
     S.k.vSet = c.kVolt; $("kVolt").value = c.kVolt;
   }
