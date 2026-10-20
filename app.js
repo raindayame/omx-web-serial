@@ -272,20 +272,23 @@ async function connectGpib() {
 function scpiWrite(cmd) {
   return writeLine(cmd + "\n");
 }
-function scpiQuery(cmd, timeoutMs = 3000) {
+function scpiQuery(cmd, timeoutMs) {
+  // GPIB 經 bridge（逾時 5 秒），網頁端要給得比它長，避免遲到回應錯配到下一個查詢
+  const limit = timeoutMs || (S.kLink === "gpib" ? 6000 : 3000);
   return new Promise((resolve, reject) => {
     if (S.k.pending) { reject(new Error("SCPI 忙碌中")); return; }
+    const pending = {
+      resolve: (v) => { clearTimeout(timer); if (S.k.pending === pending) S.k.pending = null; resolve(v); },
+      reject: (e) => { clearTimeout(timer); if (S.k.pending === pending) S.k.pending = null; reject(e); },
+    };
     const timer = setTimeout(() => {
-      if (S.k.pending && S.k.pending.resolve === resolve) {
+      if (S.k.pending === pending) {
         S.k.pending = null;
         reject(new Error("SCPI 逾時：" + cmd));
       }
-    }, timeoutMs);
-    S.k.pending = {
-      resolve: (v) => { clearTimeout(timer); S.k.pending = null; resolve(v); },
-      reject: (e) => { clearTimeout(timer); S.k.pending = null; reject(e); },
-    };
-    writeLine(cmd + "\n").catch(S.k.pending.reject);
+    }, limit);
+    S.k.pending = pending;
+    writeLine(cmd + "\n").catch(pending.reject);
   });
 }
 function kHandleText(chunk) {
