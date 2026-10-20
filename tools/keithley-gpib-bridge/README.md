@@ -31,6 +31,16 @@ python bridge.py
 - 若改過儀器位址，用 NI MAX 查，或在網頁連接前先確認。
 - 也可用 `python -c "import pyvisa; print(pyvisa.ResourceManager().list_resources())"` 列出。
 
+## 從網頁一鍵啟動（選用）
+
+網頁基於安全限制不能直接執行本機程式，但可用 Windows 自訂 URL 協定繞過：
+
+1. 把 `install_protocol.bat` 跟 `bridge.py` 放同一資料夾，執行一次（不需管理員權限）。
+2. 之後在網頁 Keithley GPIB 模式按「啟動橋接」按鈕，就會叫起 bridge.py。
+3. Chrome 第一次會跳出確認，勾選「一律允許」即可。
+
+不想每次手動按：把 `pythonw bridge.py` 做成開機自動啟動（bat 捷徑丟進 `shell:startup`），開機即在背景跑。
+
 ## 疑難排解
 
 - 網頁顯示「連不上橋接程式」：確認 `bridge.py` 有在跑、port 8765 沒被佔用。

@@ -751,7 +751,7 @@ function updateConnModeUI() {
   if (!isK) {
     hint.textContent = "僅 Chrome / Edge 支援 Web Serial。頁面需經 HTTPS 開啟。斷開後不需重選，直接按「連接 COM」即可重連。";
   } else if (gpib) {
-    hint.textContent = "GPIB 模式：請先在本機執行 tools/keithley-gpib-bridge/bridge.py（需 Python＋pyvisa＋NI-VISA 驅動），再按「連接 GPIB」。NI GPIB-USB-HS 不會出現在瀏覽器 COM 選單中，這是正常的。";
+    hint.textContent = "GPIB 模式：先啟動本機橋接程式再按「連接 GPIB」。可按「啟動橋接」按鈕（需先執行一次 install_protocol.bat 註冊協定），或設開機自動啟動。NI GPIB-USB-HS 不會出現在瀏覽器 COM 選單中，這是正常的。";
   } else {
     hint.textContent = "RS-232 直連：請用 USB 轉 RS-232 線接儀器背板 RS-232 孔，儀器面板切到 RS-232（MENU → COMMUNICATION）。斷開後不需重選，直接按「連接」即可重連。";
   }
@@ -1013,6 +1013,10 @@ function bindEvents() {
   $("baudSel").onchange = saveSettings;
   $("connModeSel").onchange = () => { updateConnModeUI(); saveSettings(); };
   $("gpibAddr").onchange = saveSettings;
+  $("btnGpibLaunch").onclick = () => {
+    window.location.href = "keithley-bridge://start";
+    log("已嘗試啟動本機橋接程式（需先執行過 install_protocol.bat 註冊協定；Chrome 首次會要求確認）。");
+  };
 
   $("btnCalSend").onclick = async () => {
     try {
