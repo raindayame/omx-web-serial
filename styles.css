@@ -11,13 +11,16 @@
   --amber: #fbbf24;
 }
 * { box-sizing: border-box; }
+/* hidden 必須真的隱藏：.row、.chart-env 等自帶 display:flex，
+   會蓋掉瀏覽器預設的 [hidden] 隱藏，之前連接方式／GPIB 列
+   在 ESP32 下仍顯示就是這個原因。 */
+[hidden] { display: none !important; }
 body {
   margin: 0; background: var(--bg); color: var(--text);
   font-family: "Segoe UI", "Microsoft JhengHei", system-ui, sans-serif;
   font-size: 14px;
 }
 .conn-status { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-.btn-row .conn-status { margin-left: auto; }
 .conn-status .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); }
 .conn-status.on .dot { background: var(--green); box-shadow: 0 0 8px var(--green); }
 
