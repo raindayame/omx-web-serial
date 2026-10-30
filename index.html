@@ -220,6 +220,22 @@
         <button id="btnCalSend">送出校正</button>
         <span id="calState" class="muted"></span>
       </div>
+      <div class="row">
+        <label>自動校正通道</label>
+        <select id="autoCalCh">
+          <option>A</option><option>B</option><option>C</option><option>D</option>
+          <option>E</option><option>F</option><option>G</option><option>H</option>
+          <option>I</option><option>J</option><option>K</option><option>L</option>
+          <option>M</option><option>N</option><option>O</option><option>P</option>
+        </select>
+        <label>校正電阻 (kΩ)</label>
+        <input type="number" id="autoCalR" value="50" step="any">
+      </div>
+      <div class="btn-row">
+        <button id="btnAutoCal">自動校正</button>
+        <span id="autoCalState" class="muted"></span>
+      </div>
+      <p class="hint">先將所選通道接上標準電阻（預設 50kΩ），再按自動校正。程式會反覆微調該通道所屬 ADC 組的參考電壓，直到讀值落在目標 ±1% 內；失敗會自動還原原值。對應關係：ADC1=A–D、ADC2=E–H、ADC3=I–L、ADC4=M–P，同一組的 4 個通道會一起受影響。</p>
     </section>
 
 <section class="card">

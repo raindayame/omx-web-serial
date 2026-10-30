@@ -748,6 +748,7 @@ function handleLine(line) {
     }
     log(`自動偵測完成：${S.channels.length} 通道（${S.channels.join(",")}）。`);
     renderChannelGrid();
+    refreshAutoCalChannels();
   }
   const parsed = {};
   for (const m of matches) parsed[m[2]] = parseFloat(m[1]);
@@ -1185,6 +1186,146 @@ function readAdcInputs() {
   return vs;
 }
 
+/* ---------------- ADC 自動校正 ----------------
+ * 原理（不依賴韌體內部分壓公式）：
+ * 網頁只收到 ESP32 已換算好的電阻值（kΩ，見 S.dataBuf），不知道
+ * 原始 ADC 計數與負載電阻，所以不用公式一次反推參考電壓，改用
+ * 閉迴路試探：先以 +0.02 V 試探，量出「參考電壓每變 1 V、讀值變
+ * 多少 kΩ」的斜率與方向，再依誤差逐步調整、每步不超過 0.10 V，
+ * 直到讀值落在目標 ±1% 內。失敗時把原值送回，板子不留壞值。
+ * 注意：校正的是整組 ADC，ADC1=A–D、ADC2=E–H、ADC3=I–L、
+ * ADC4=M–P，同一組的 4 個通道會一起受影響。 */
+function adcGroupForChannel(ch) {
+  if (!ch) return -1;
+  if (/^[A-P]$/.test(ch)) return Math.floor((ch.charCodeAt(0) - 65) / 4);
+  // 32 通道時只有 4 組校正值，後 16 通道以 16 為週期循環對應
+  const idx = S.channels.indexOf(ch);
+  return idx >= 0 ? Math.floor((idx % 16) / 4) : -1;
+}
+function adcGroupChannels(group) {
+  const letters = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P"];
+  return letters.slice(group * 4, group * 4 + 4).join("、");
+}
+function medianOf(arr) {
+  const s = [...arr].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+function sleepMs(ms) { return new Promise((r) => setTimeout(r, ms)); }
+async function waitForFreshSamples(ch, fromLen, need, timeoutMs) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const buf = S.dataBuf[ch] || [];
+    if (buf.length >= fromLen + need) return buf.slice(-need);
+    if (!S.connected) throw new Error("連線已中斷");
+    await sleepMs(200);
+  }
+  throw new Error("等不到新的量測資料（逾時）");
+}
+async function readChannelMedian(ch) {
+  const buf = S.dataBuf[ch] || [];
+  // 每筆平均值約 S.interval 秒一筆，留 2 筆的緩衝再加 5 秒給韌體反應
+  const timeoutMs = Math.max(15000, (2 + 2) * (S.interval || 1) * 1000 + 5000);
+  const samples = await waitForFreshSamples(ch, buf.length, 2, timeoutMs);
+  return medianOf(samples);
+}
+async function sendAdcValues(vs) {
+  await writeLine("y" + vs.map(fmtAdc).join(" ") + "\n");
+}
+function refreshAutoCalChannels() {
+  const sel = $("autoCalCh");
+  if (!sel || !S.channels.length) return;
+  const cur = sel.value;
+  sel.innerHTML = "";
+  for (const ch of S.channels) {
+    const o = document.createElement("option");
+    o.textContent = ch; sel.appendChild(o);
+  }
+  if (S.channels.includes(cur)) sel.value = cur;
+}
+let autoCalRunning = false;
+async function autoCalibrate() {
+  if (autoCalRunning) return;
+  const ch = $("autoCalCh") ? $("autoCalCh").value : "";
+  const target = $("autoCalR") ? parseFloat($("autoCalR").value) : NaN;
+  if (!ch) { log("自動校正失敗：請先選擇通道。"); return; }
+  if (!Number.isFinite(target) || target <= 0) {
+    log("自動校正失敗：校正電阻需為大於 0 的數字（kΩ）。"); return;
+  }
+  if (!S.connected || S.instrument !== "esp32") {
+    log("自動校正失敗：需先連接 ESP32。"); return;
+  }
+  if (!S.hasData || !S.channels.includes(ch)) {
+    log(`自動校正失敗：尚未收到通道 ${ch} 的資料，請先連線並等首筆資料。`); return;
+  }
+  const group = adcGroupForChannel(ch);
+  if (group < 0 || group > 3) {
+    log(`自動校正失敗：通道 ${ch} 無法對應到 ADC1–ADC4。`); return;
+  }
+  const orig = [...S.adc];
+  const origV = orig[group];
+  const tol = target * 0.01;
+  autoCalRunning = true;
+  $("btnAutoCal").disabled = true;
+  $("autoCalState").textContent = "校正中…";
+  try {
+    log(`自動校正開始：通道 ${ch}（${adcGroupChannels(group)}，ADC${group + 1}）目標 ${target} kΩ，現值 ADC${group + 1}=${fmtAdc(origV)} V；請確認該通道已接上標準電阻。`);
+    let measured = await readChannelMedian(ch);
+    log(`自動校正：通道 ${ch} 目前讀值 ${measured.toFixed(2)} kΩ（目標 ${target} kΩ，容許 ±1%）`);
+    if (Math.abs(measured - target) <= tol) {
+      $("autoCalState").textContent = `已在容許範圍內，無需調整（${measured.toFixed(2)} kΩ）`;
+      log(`自動校正完成：通道 ${ch} 已在 ±1% 內，ADC${group + 1} 維持 ${fmtAdc(origV)} V。`);
+      return;
+    }
+    // 試探一步，量出方向與斜率
+    if (origV >= 6) throw new Error("參考電壓已在 6 V 上限，無法再向上試探");
+    let sent = [...orig];
+    const probeV = Math.min(6, origV + 0.02);
+    sent[group] = probeV;
+    await sendAdcValues(sent);
+    const measuredProbe = await readChannelMedian(ch);
+    let slope = (measuredProbe - measured) / (probeV - origV); // kΩ / V
+    log(`自動校正：試探 ADC${group + 1} ${fmtAdc(origV)}→${fmtAdc(probeV)} V，讀值 ${measured.toFixed(2)}→${measuredProbe.toFixed(2)} kΩ`);
+    if (!Number.isFinite(slope) || Math.abs(slope) < 0.5) {
+      throw new Error("試探變化太小，無法判斷調整方向（讀值不穩或該組 ADC 不影響此通道）");
+    }
+    let curV = probeV, curMeasured = measuredProbe;
+    for (let i = 0; i < 10; i++) {
+      if (Math.abs(curMeasured - target) <= tol) break;
+      let dv = (target - curMeasured) / slope;
+      dv = Math.max(-0.10, Math.min(0.10, dv));
+      if (Math.abs(dv) < 0.001) dv = Math.sign(dv || 1) * 0.005;
+      const nextV = Math.max(0.1, Math.min(6, curV + dv));
+      if (nextV === curV) throw new Error("參考電壓已到可調邊界，無法再向目標調整");
+      const prevV = curV, prevMeasured = curMeasured;
+      sent = [...sent]; sent[group] = nextV;
+      await sendAdcValues(sent);
+      curMeasured = await readChannelMedian(ch);
+      curV = nextV;
+      if (Math.abs(nextV - prevV) > 0.0005 && Math.abs(curMeasured - prevMeasured) > 0.05) {
+        slope = (curMeasured - prevMeasured) / (nextV - prevV);
+      }
+      log(`自動校正：第 ${i + 1} 次調整 ADC${group + 1}=${fmtAdc(curV)} V，讀值 ${curMeasured.toFixed(2)} kΩ`);
+    }
+    if (Math.abs(curMeasured - target) > tol) {
+      throw new Error(`10 次調整後仍未進入 ±1%（目前 ${curMeasured.toFixed(2)} kΩ）`);
+    }
+    S.adc = sent; saveSettings();
+    $(`adc${group + 1}`).value = curV;
+    $("autoCalState").textContent = `已校正：ADC${group + 1} ${fmtAdc(origV)}→${fmtAdc(curV)} V（${curMeasured.toFixed(2)} kΩ）`;
+    log(`自動校正完成：通道 ${ch} ${curMeasured.toFixed(2)} kΩ，ADC${group + 1} 由 ${fmtAdc(origV)} V 改為 ${fmtAdc(curV)} V（y${sent.map(fmtAdc).join(" ")}）。`);
+  } catch (e) {
+    try { await sendAdcValues(orig); } catch { /* 還原失敗也如實記錄 */ }
+    S.adc = orig;
+    $(`adc${group + 1}`).value = origV;
+    $("autoCalState").textContent = "失敗，已還原原值";
+    log(`自動校正失敗：${e.message}；已還原 ADC${group + 1}=${fmtAdc(origV)} V。`);
+  } finally {
+    autoCalRunning = false;
+    $("btnAutoCal").disabled = false;
+  }
+}
+
 /* ---------------- 事件綁定 ---------------- */
 function bindEvents() {
   $("btnConnect").onclick = connectSerial;
@@ -1295,6 +1436,8 @@ function bindEvents() {
       log(`ADC 校正指令已送出 (y${vs.map(fmtAdc).join(" ")})`);
     } catch (e) { log(`校正失敗：${e.message}`); }
   };
+
+  $("btnAutoCal").onclick = autoCalibrate;
 
   $("btnMode").onclick = () => {
     S.mode = S.mode === "RESISTANCE" ? "SENSITIVITY" : "RESISTANCE";
