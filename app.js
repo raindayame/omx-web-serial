@@ -973,9 +973,12 @@ function applyInstrumentUI(mode) {
   $("gpibAddr").value = c["gpibAddr_" + mode] || GPIB_DEFAULTS[mode] || "";
 }
 // 依連接方式顯示／隱藏 GPIB 位址列、鮑率列，並更新提示文字
+// ESP32 不走 SCPI 連接方式：無論之前存的是什麼模式，連接方式列與
+// GPIB 位址列都要強制隱藏，避免讓人以為 ESP32 還需要這些設定。
 function updateConnModeUI() {
   const isScpi = S.instrument !== "esp32";
   const gpib = isScpi && $("connModeSel").value === "gpib";
+  $("connModeRow").hidden = !isScpi;
   $("gpibRow").hidden = !gpib;
   $("baudRow").hidden = gpib;
   $("btnForget").disabled = gpib;
