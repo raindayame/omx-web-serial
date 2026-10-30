@@ -1235,6 +1235,14 @@ async function readChannelMedian(ch) {
 async function sendAdcValues(vs) {
   await writeLine("y" + vs.map(fmtAdc).join(" ") + "\n");
 }
+// 自動校正通道選單：按 ADC 組分 4 色，4 個通道一色，
+// 後 16 通道以 16 為週期循環對應，故顏色也跟著循環。
+// 淺色底＋深色字，展開的選單與收起的選單都看得清楚。
+const AUTO_CAL_GROUP_COLORS = ["#dbeafe", "#dcfce7", "#fef3c7", "#fce7f3"];
+function autoCalGroupColor(ch) {
+  const g = adcGroupForChannel(ch);
+  return g >= 0 ? AUTO_CAL_GROUP_COLORS[g] : "";
+}
 function refreshAutoCalChannels() {
   const sel = $("autoCalCh");
   if (!sel || !S.channels.length) return;
@@ -1242,9 +1250,19 @@ function refreshAutoCalChannels() {
   sel.innerHTML = "";
   for (const ch of S.channels) {
     const o = document.createElement("option");
-    o.textContent = ch; sel.appendChild(o);
+    o.value = ch; o.textContent = ch;
+    o.style.backgroundColor = autoCalGroupColor(ch);
+    o.style.color = "#111827";
+    sel.appendChild(o);
   }
   if (S.channels.includes(cur)) sel.value = cur;
+  // 收起的選單跟著目前選到的通道換色
+  sel.style.backgroundColor = autoCalGroupColor(sel.value);
+  sel.style.color = "#111827";
+  sel.onchange = () => {
+    sel.style.backgroundColor = autoCalGroupColor(sel.value);
+    sel.style.color = "#111827";
+  };
 }
 let autoCalRunning = false;
 async function autoCalibrate() {
