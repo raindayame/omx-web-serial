@@ -7,11 +7,6 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<header class="topbar">
-  <div class="brand">OMX <span>Web Serial</span></div>
-  <div class="conn-status" id="connStatus"><span class="dot"></span><span id="connText">未連線</span></div>
-</header>
-
 <div class="layout">
   <div class="layout">
   <aside class="sidebar sidebar-left">
@@ -52,6 +47,7 @@
         <button id="btnConnect" class="primary">連接 COM</button>
         <button id="btnDisconnect" disabled>斷開</button>
         <button id="btnForget" title="忘記已配對裝置，下次連接重新選擇">換裝置</button>
+        <div class="conn-status" id="connStatus"><span class="dot"></span><span id="connText">未連線</span></div>
       </div>
       <div class="hint" id="connHint">僅 Chrome / Edge 支援 Web Serial。頁面需經 HTTPS 開啟。斷開後不需重選，直接按「連接 COM」即可重連。</div>
     </section>
