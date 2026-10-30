@@ -958,7 +958,7 @@ function applyInstrumentUI(mode) {
   $("kCard").hidden = mode !== "keithley";
   $("aCard").hidden = mode !== "agilent";
   $("adcCard").hidden = isScpi;
-  $("envCard").hidden = isScpi;
+  $("chartEnv").hidden = isScpi;
   $("measCard").hidden = isScpi;
   $("chartTitle").textContent =
     mode === "keithley" ? "即時監控圖 — 電阻 (Ω)" :
