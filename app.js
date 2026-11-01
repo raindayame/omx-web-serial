@@ -64,6 +64,7 @@ const S = {
     measuring: false, loopRunning: false, samples: [], last: NaN,
   },
   adc: [3.28, 3.27, 3.27, 3.28],
+  calDone: [],
   rules: {
     resistance: { enabled: false, min: 0, max: 1000 },
     sensitivity: { enabled: false, min: 0, max: 5 },
@@ -163,6 +164,8 @@ async function disconnectSerial() {
   // 保留 S.port：下次按連接可直接重開，不用再選一次
   S.reader = null; S.writer = null;
   S.connected = false;
+  S.calDone = [];
+  updateCalIndicators();
   updateConnUI();
   log("已斷開連線。");
 }
@@ -912,6 +915,22 @@ function updateConnUI() {
   $("btnDisconnect").disabled = !S.connected;
   $("connStatus").classList.toggle("on", S.connected);
   $("connText").textContent = S.connected ? "已連線" : "未連線";
+  updateWorkflowUI();
+}
+// 流程顏色提醒（只提醒，不擋操作）：連上後自動校正亮主色；四組全校完換開始記錄亮主色；記錄中兩者都回復原色
+function updateWorkflowUI() {
+  const allDone = Array.isArray(S.calDone) && S.calDone.length >= 4;
+  const esp = S.connected && S.instrument === "esp32" && !S.recording;
+  const autoBtn = $("btnAutoCal");
+  if (autoBtn) autoBtn.classList.toggle("primary", esp && !allDone);
+  const recBtn = $("btnRecToggle");
+  if (recBtn) recBtn.classList.toggle("primary", esp && allDone);
+}
+function updateCalIndicators() {
+  for (let g = 0; g < 4; g++) {
+    const el = $(`adcCal${g + 1}`);
+    if (el) el.classList.toggle("done", Array.isArray(S.calDone) && S.calDone.includes(g));
+  }
 }
 
 function resetSession() {
@@ -920,12 +939,13 @@ function resetSession() {
     accum: {}, tempAcc: [], humdAcc: [],
     timeBuf: [], dataBuf: {}, sensBuf: {}, tempBuf: [], humdBuf: [],
     r0: {}, hasR0: false, csvRows: [], lineBuf: "",
-    segStart: performance.now(), segFileHandle: null,
+    segStart: performance.now(), segFileHandle: null, calDone: [],
   });
   mainChart.clear();
   $("chGrid").innerHTML = "";
   $("chartInfo").textContent = "等待資料…";
   if (S.recording) stopRecording(false);
+  updateCalIndicators(); updateWorkflowUI();
 }
 
 /* ---------------- 儀器切換 ---------------- */
@@ -1172,6 +1192,7 @@ function updateRecUI() {
   btn.textContent = S.recording ? "停止記錄" : "開始記錄";
   btn.classList.toggle("recording", S.recording);
   if (st) { st.textContent = S.recording ? "● 紀錄中" : "未記錄"; st.classList.toggle("rec-on", S.recording); }
+  updateWorkflowUI();
 }
 function stopRecording(download = true) {
   if (!S.recording) return;
@@ -1341,6 +1362,8 @@ async function autoCalibrate() {
     if (curV !== bestV) { await sendAdcValues(bestVs); }
     S.adc = bestVs; saveSettings();
     if (bestErr <= tol) {
+      if (!S.calDone.includes(group)) S.calDone.push(group);
+      updateCalIndicators(); updateWorkflowUI();
       $("autoCalState").textContent = `已校正：ADC${group + 1} ${fmtAdc(origV)}→${fmtAdc(bestV)} V（${fmtR(bestMeasured)} kΩ）`;
       log(`自動校正完成：通道 ${ch} ${fmtR(bestMeasured)} kΩ，ADC${group + 1} 由 ${fmtAdc(origV)} V 改為 ${fmtAdc(bestV)} V（y${bestVs.map(fmtAdc).join(" ")}）。`);
     } else if (bestV !== origV) {
