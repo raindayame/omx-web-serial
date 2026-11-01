@@ -46,6 +46,8 @@ button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
 button.primary { background: #0369a1; border-color: #0284c7; }
 button.toggle.on { background: #065f46; border-color: #10b981; }
+button.recording { background: #991b1b; border-color: #ef4444; color: #fff; }
+.rec-on { color: var(--red); font-weight: 600; }
 
 input[type="number"], select {
   background: #0b1220; color: var(--text); border: 1px solid var(--line);

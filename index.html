@@ -51,10 +51,9 @@
       </div>
       <div class="btn-row">
         <button id="btnConnect" class="primary">連接 COM</button>
-        <button id="btnDisconnect" disabled>斷開</button>
-        <button id="btnForget" title="忘記已配對裝置，下次連接重新選擇">換裝置</button>
+        <button id="btnDisconnect" disabled>斷開並換裝置</button>
       </div>
-      <div class="hint" id="connHint">僅 Chrome / Edge 支援 Web Serial。頁面需經 HTTPS 開啟。斷開後不需重選，直接按「連接 COM」即可重連。</div>
+      <div class="hint" id="connHint">僅 Chrome / Edge 支援 Web Serial。頁面需經 HTTPS 開啟。</div>
     </section>
 
 <section class="card">
@@ -62,6 +61,10 @@
       <div class="btn-row">
         <button id="btnPickDir">選擇儲存資料夾</button>
         <span id="dirName" class="muted">未選擇</span>
+      </div>
+      <div class="btn-row" id="recRow">
+        <button id="btnRecToggle">開始記錄</button>
+        <span id="recState" class="muted">未記錄</span>
       </div>
       <div class="row">
         <label>分段間隔</label>
@@ -199,10 +202,6 @@
         <button id="btnR0">設置 Rair</button>
       </div>
       <div class="btn-row">
-        <button id="btnRecStart">開始記錄</button>
-        <button id="btnRecStop" disabled>停止並下載</button>
-      </div>
-      <div class="btn-row">
         <button id="btnTimerStart">計時開始</button>
         <button id="btnTimerStop">停止</button>
         <button id="btnTimerReset">歸零</button>
@@ -212,16 +211,6 @@
 
 <section class="card" id="adcCard">
       <h2>ADC 校正</h2>
-      <div class="adc-grid">
-        <label>ADC1 <input type="number" step="0.001" id="adc1" value="3.28"></label>
-        <label>ADC2 <input type="number" step="0.001" id="adc2" value="3.27"></label>
-        <label>ADC3 <input type="number" step="0.001" id="adc3" value="3.27"></label>
-        <label>ADC4 <input type="number" step="0.001" id="adc4" value="3.28"></label>
-      </div>
-      <div class="btn-row">
-        <button id="btnCalSend">送出校正</button>
-        <span id="calState" class="muted"></span>
-      </div>
       <div class="row">
         <label>自動校正通道</label>
         <select id="autoCalCh" style="background:#dbeafe;color:#111827">
@@ -239,7 +228,7 @@
         <button id="btnAutoCal">自動校正</button>
         <span id="autoCalState" class="muted"></span>
       </div>
-      <p class="hint">先將所選通道接上標準電阻（預設 50kΩ），再按自動校正。程式會反覆微調該通道所屬 ADC 組的參考電壓，直到讀值落在目標 ±1% 內；失敗會自動還原原值。對應關係：ADC1=A–D、ADC2=E–H、ADC3=I–L、ADC4=M–P，同一組的 4 個通道會一起受影響。</p>
+      <p class="hint">先將所選通道接上標準電阻（預設 50kΩ），再按自動校正。</p>
     </section>
 
 <section class="card">

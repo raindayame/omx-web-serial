@@ -164,7 +164,7 @@ async function disconnectSerial() {
   S.reader = null; S.writer = null;
   S.connected = false;
   updateConnUI();
-  log("已斷開連線。再次按下「連接 COM」可直接重連。");
+  log("已斷開連線。");
 }
 
 async function forgetDevice() {
@@ -960,6 +960,7 @@ function applyInstrumentUI(mode) {
   $("adcCard").hidden = isScpi;
   $("chartEnv").hidden = isScpi;
   $("measCard").hidden = isScpi;
+  $("recRow").hidden = isScpi;
   $("chartTitle").textContent =
     mode === "keithley" ? "即時監控圖 — 電阻 (Ω)" :
     mode === "agilent" ? "即時監控圖 — Agilent 34401A" : "即時監控圖 — 電阻 (kΩ)";
@@ -981,17 +982,16 @@ function updateConnModeUI() {
   $("connModeRow").hidden = !isScpi;
   $("gpibRow").hidden = !gpib;
   $("baudRow").hidden = gpib;
-  $("btnForget").disabled = gpib;
   $("btnConnect").textContent = !isScpi ? "連接 COM" : (gpib ? "連接 GPIB" : "連接");
   const hint = $("connHint");
   if (!isScpi) {
-    hint.textContent = "僅 Chrome / Edge 支援 Web Serial。頁面需經 HTTPS 開啟。斷開後不需重選，直接按「連接 COM」即可重連。";
+    hint.textContent = "僅 Chrome / Edge 支援 Web Serial。頁面需經 HTTPS 開啟。";
   } else if (gpib) {
     hint.textContent = "GPIB 模式：先啟動本機橋接程式再按「連接 GPIB」。可按「啟動橋接」按鈕（需先執行一次 install_protocol.bat 註冊協定），或設開機自動啟動。橋接程式為通用 SCPI 轉發，Keithley 2400 與 Agilent 34401A 皆可用。NI GPIB-USB-HS 不會出現在瀏覽器 COM 選單中，這是正常的。";
   } else if (S.instrument === "agilent") {
-    hint.textContent = "RS-232 直連：請用 USB 轉 RS-232 線接 34401A 背板 RS-232 孔，儀器介面設為 RS-232（Utility → I/O），鮑率預設 9600。斷開後不需重選，直接按「連接」即可重連。";
+    hint.textContent = "RS-232 直連：請用 USB 轉 RS-232 線接 34401A 背板 RS-232 孔，儀器介面設為 RS-232（Utility → I/O），鮑率預設 9600。";
   } else {
-    hint.textContent = "RS-232 直連：請用 USB 轉 RS-232 線接儀器背板 RS-232 孔，儀器面板切到 RS-232（MENU → COMMUNICATION）。斷開後不需重選，直接按「連接」即可重連。";
+    hint.textContent = "RS-232 直連：請用 USB 轉 RS-232 線接儀器背板 RS-232 孔，儀器面板切到 RS-232（MENU → COMMUNICATION）。";
   }
 }
 async function setInstrument(mode) {
@@ -1166,11 +1166,17 @@ async function kExportExcel() {
   }
 }
 
+function updateRecUI() {
+  const btn = $("btnRecToggle"), st = $("recState");
+  if (!btn) return;
+  btn.textContent = S.recording ? "停止記錄" : "開始記錄";
+  btn.classList.toggle("recording", S.recording);
+  if (st) { st.textContent = S.recording ? "● 紀錄中" : "未記錄"; st.classList.toggle("rec-on", S.recording); }
+}
 function stopRecording(download = true) {
   if (!S.recording) return;
   S.recording = false;
-  $("btnRecStart").disabled = false;
-  $("btnRecStop").disabled = true;
+  updateRecUI();
   if (download && S.recResRows.length) {
     downloadCSV(`gas_resistance_${stamp()}.csv`, S.recResRows);
     downloadCSV(`gas_senstivity_${stamp()}.csv`, S.recSensRows);
@@ -1181,14 +1187,7 @@ function stopRecording(download = true) {
 
 /* ---------------- ADC 校正 ---------------- */
 function fmtAdc(v) { return String(parseFloat(Number(v).toFixed(4))); }
-function readAdcInputs() {
-  const vs = ["adc1", "adc2", "adc3", "adc4"].map((id) => parseFloat($(id).value));
-  if (vs.length !== 4 || vs.some((v) => !Number.isFinite(v) || v <= 0 || v > 6)) {
-    throw new Error("ADC 校正值需為 0 ~ 6 V 之間的有效數字（共 4 組）");
-  }
-  return vs;
-}
-
+function fmtR(v) { return Number.isFinite(v) ? Number(v).toPrecision(4) : ""; }
 /* ---------------- ADC 自動校正 ----------------
  * 原理（不依賴韌體內部分壓公式）：
  * 網頁只收到 ESP32 已換算好的電阻值（kΩ，見 S.dataBuf），不知道
@@ -1286,18 +1285,21 @@ async function autoCalibrate() {
   const orig = [...S.adc];
   const origV = orig[group];
   const tol = target * 0.01;
+  // 最佳值追蹤：最終留誤差最小的一組，而非最後一組；±1% 只是可接受門檻，不是停損點
+  let bestV = origV, bestVs = [...orig], bestMeasured = NaN, bestErr = Infinity, origErr = Infinity;
+  const noteBest = (v, vs, m) => {
+    const e = Math.abs(m - target);
+    if (e < bestErr) { bestErr = e; bestV = v; bestVs = [...vs]; bestMeasured = m; }
+    return e;
+  };
   autoCalRunning = true;
   $("btnAutoCal").disabled = true;
   $("autoCalState").textContent = "校正中…";
   try {
     log(`自動校正開始：通道 ${ch}（${adcGroupChannels(group)}，ADC${group + 1}）目標 ${target} kΩ，現值 ADC${group + 1}=${fmtAdc(origV)} V；請確認該通道已接上標準電阻。`);
     let measured = await readChannelMedian(ch);
-    log(`自動校正：通道 ${ch} 目前讀值 ${measured.toFixed(2)} kΩ（目標 ${target} kΩ，容許 ±1%）`);
-    if (Math.abs(measured - target) <= tol) {
-      $("autoCalState").textContent = `已在容許範圍內，無需調整（${measured.toFixed(2)} kΩ）`;
-      log(`自動校正完成：通道 ${ch} 已在 ±1% 內，ADC${group + 1} 維持 ${fmtAdc(origV)} V。`);
-      return;
-    }
+    origErr = noteBest(origV, orig, measured);
+    log(`自動校正：通道 ${ch} 目前讀值 ${fmtR(measured)} kΩ（目標 ${target} kΩ，容許 ±1%）`);
     // 試探一步，量出方向與斜率
     if (origV >= 6) throw new Error("參考電壓已在 6 V 上限，無法再向上試探");
     let sent = [...orig];
@@ -1305,42 +1307,64 @@ async function autoCalibrate() {
     sent[group] = probeV;
     await sendAdcValues(sent);
     const measuredProbe = await readChannelMedian(ch);
+    noteBest(probeV, sent, measuredProbe);
     let slope = (measuredProbe - measured) / (probeV - origV); // kΩ / V
-    log(`自動校正：試探 ADC${group + 1} ${fmtAdc(origV)}→${fmtAdc(probeV)} V，讀值 ${measured.toFixed(2)}→${measuredProbe.toFixed(2)} kΩ`);
+    log(`自動校正：試探 ADC${group + 1} ${fmtAdc(origV)}→${fmtAdc(probeV)} V，讀值 ${fmtR(measured)}→${fmtR(measuredProbe)} kΩ`);
     if (!Number.isFinite(slope) || Math.abs(slope) < 0.5) {
       throw new Error("試探變化太小，無法判斷調整方向（讀值不穩或該組 ADC 不影響此通道）");
     }
     let curV = probeV, curMeasured = measuredProbe;
+    let noImprove = 0;
     for (let i = 0; i < 10; i++) {
-      if (Math.abs(curMeasured - target) <= tol) break;
-      let dv = (target - curMeasured) / slope;
+      if (bestErr <= target * 0.001) break;
+      if (noImprove >= 2) break;
+      let dv = (target - curMeasured) / slope * 0.8;
       dv = Math.max(-0.10, Math.min(0.10, dv));
-      if (Math.abs(dv) < 0.001) dv = Math.sign(dv || 1) * 0.005;
+      if (Math.abs(dv) < 0.001) dv = Math.sign(dv || 1) * 0.001;
       const nextV = Math.max(0.1, Math.min(6, curV + dv));
-      if (nextV === curV) throw new Error("參考電壓已到可調邊界，無法再向目標調整");
+      if (nextV === curV) break;
       const prevV = curV, prevMeasured = curMeasured;
       sent = [...sent]; sent[group] = nextV;
       await sendAdcValues(sent);
       curMeasured = await readChannelMedian(ch);
       curV = nextV;
       if (Math.abs(nextV - prevV) > 0.0005 && Math.abs(curMeasured - prevMeasured) > 0.05) {
-        slope = (curMeasured - prevMeasured) / (nextV - prevV);
+        const ns = (curMeasured - prevMeasured) / (nextV - prevV);
+        if (Number.isFinite(ns) && Math.abs(ns) >= 0.5) slope = ns;
       }
-      log(`自動校正：第 ${i + 1} 次調整 ADC${group + 1}=${fmtAdc(curV)} V，讀值 ${curMeasured.toFixed(2)} kΩ`);
+      const prevBest = bestErr;
+      noteBest(curV, sent, curMeasured);
+      if (bestErr < prevBest) noImprove = 0; else noImprove++;
+      log(`自動校正：第 ${i + 1} 次調整 ADC${group + 1}=${fmtAdc(curV)} V，讀值 ${fmtR(curMeasured)} kΩ`);
     }
-    if (Math.abs(curMeasured - target) > tol) {
-      throw new Error(`10 次調整後仍未進入 ±1%（目前 ${curMeasured.toFixed(2)} kΩ）`);
+    // 回到最佳值（若板子目前不在最佳值上，先送回）
+    if (curV !== bestV) { await sendAdcValues(bestVs); }
+    S.adc = bestVs; saveSettings();
+    if (bestErr <= tol) {
+      $("autoCalState").textContent = `已校正：ADC${group + 1} ${fmtAdc(origV)}→${fmtAdc(bestV)} V（${fmtR(bestMeasured)} kΩ）`;
+      log(`自動校正完成：通道 ${ch} ${fmtR(bestMeasured)} kΩ，ADC${group + 1} 由 ${fmtAdc(origV)} V 改為 ${fmtAdc(bestV)} V（y${bestVs.map(fmtAdc).join(" ")}）。`);
+    } else if (bestV !== origV) {
+      $("autoCalState").textContent = `未達 ±1%，已保留最佳值：ADC${group + 1} ${fmtAdc(bestV)} V（${fmtR(bestMeasured)} kΩ）`;
+      log(`自動校正未達 ±1%（最佳 ${fmtR(bestMeasured)} kΩ），已保留最佳值 ADC${group + 1}=${fmtAdc(bestV)} V。`);
+    } else {
+      try { await sendAdcValues(orig); } catch { /* 還原失敗也如實記錄 */ }
+      S.adc = orig;
+      $("autoCalState").textContent = "失敗，已還原原值";
+      log(`自動校正失敗：10 次調整後仍未進入 ±1%（目前 ${fmtR(curMeasured)} kΩ）；已還原 ADC${group + 1}=${fmtAdc(origV)} V。`);
     }
-    S.adc = sent; saveSettings();
-    $(`adc${group + 1}`).value = curV;
-    $("autoCalState").textContent = `已校正：ADC${group + 1} ${fmtAdc(origV)}→${fmtAdc(curV)} V（${curMeasured.toFixed(2)} kΩ）`;
-    log(`自動校正完成：通道 ${ch} ${curMeasured.toFixed(2)} kΩ，ADC${group + 1} 由 ${fmtAdc(origV)} V 改為 ${fmtAdc(curV)} V（y${sent.map(fmtAdc).join(" ")}）。`);
   } catch (e) {
-    try { await sendAdcValues(orig); } catch { /* 還原失敗也如實記錄 */ }
-    S.adc = orig;
-    $(`adc${group + 1}`).value = origV;
-    $("autoCalState").textContent = "失敗，已還原原值";
-    log(`自動校正失敗：${e.message}；已還原 ADC${group + 1}=${fmtAdc(origV)} V。`);
+    // 失敗時留最佳值（若有進步），否則還原原值
+    const keepBest = bestV !== origV && bestErr < origErr;
+    const restoreVs = keepBest ? bestVs : orig;
+    try { await sendAdcValues(restoreVs); } catch { /* 還原失敗也如實記錄 */ }
+    S.adc = restoreVs;
+    if (keepBest) {
+      $("autoCalState").textContent = `未達目標，已保留最佳值：ADC${group + 1} ${fmtAdc(bestV)} V（${fmtR(bestMeasured)} kΩ）`;
+      log(`自動校正失敗：${e.message}；已保留最佳值 ADC${group + 1}=${fmtAdc(bestV)} V。`);
+    } else {
+      $("autoCalState").textContent = "失敗，已還原原值";
+      log(`自動校正失敗：${e.message}；已還原 ADC${group + 1}=${fmtAdc(origV)} V。`);
+    }
   } finally {
     autoCalRunning = false;
     $("btnAutoCal").disabled = false;
@@ -1350,8 +1374,7 @@ async function autoCalibrate() {
 /* ---------------- 事件綁定 ---------------- */
 function bindEvents() {
   $("btnConnect").onclick = connectSerial;
-  $("btnDisconnect").onclick = disconnectSerial;
-  $("btnForget").onclick = forgetDevice;
+  $("btnDisconnect").onclick = async () => { await disconnectSerial(); await forgetDevice(); };
 
   $("instSel").onchange = (e) => setInstrument(e.target.value);
 
@@ -1448,16 +1471,6 @@ function bindEvents() {
     log("已嘗試啟動本機橋接程式（需先執行過 install_protocol.bat 註冊協定；Chrome 首次會要求確認）。");
   };
 
-  $("btnCalSend").onclick = async () => {
-    try {
-      const vs = readAdcInputs();
-      S.adc = vs; saveSettings();
-      await writeLine("y" + vs.map(fmtAdc).join(" ") + "\n");
-      $("calState").textContent = "已送出";
-      log(`ADC 校正指令已送出 (y${vs.map(fmtAdc).join(" ")})`);
-    } catch (e) { log(`校正失敗：${e.message}`); }
-  };
-
   $("btnAutoCal").onclick = autoCalibrate;
 
   $("btnMode").onclick = () => {
@@ -1493,14 +1506,13 @@ function bindEvents() {
     log("設置 Rair 成功（以目前最新值為基準）。");
   };
 
-  $("btnRecStart").onclick = () => {
+  $("btnRecToggle").onclick = () => {
+    if (S.recording) { stopRecording(true); return; }
     if (!S.hasData) { log("尚未收到通道資料，無法開始記錄。"); return; }
     S.recording = true; S.recResRows = []; S.recSensRows = [];
-    $("btnRecStart").disabled = true;
-    $("btnRecStop").disabled = false;
+    updateRecUI();
     log("開始手動記錄。");
   };
-  $("btnRecStop").onclick = () => stopRecording(true);
 
   $("btnTimerStart").onclick = () => { S.timerRunning = true; };
   $("btnTimerStop").onclick = () => { S.timerRunning = false; };
@@ -1584,7 +1596,6 @@ function loadSettings() {
   if (c.segMs) { S.segMs = c.segMs; $("segSel").value = String(c.segMs); }
   if (Array.isArray(c.adc) && c.adc.length === 4) {
     S.adc = c.adc;
-    ["adc1", "adc2", "adc3", "adc4"].forEach((id, i) => { $(id).value = c.adc[i]; });
   }
   if (c.rules) {
     Object.assign(S.rules.resistance, c.rules.resistance || {});
