@@ -930,18 +930,19 @@ function renderChannelGrid() {
   $("chPageLabel").textContent = S.channels.length > 16 ? `(${start + 1}–${start + list.length})` : "";
   for (const ch of list) {
     const d = document.createElement("div");
-    d.className = "ch-card"; d.dataset.ch = ch;
-    d.innerHTML = `<span class="ch-badge" title="點按開關主圖線顯示">${ch}</span><div class="ch-name">CH ${ch}</div>
+    d.className = "ch-card"; d.dataset.ch = ch; d.title = "點按開關主圖線顯示";
+    d.innerHTML = `<span class="ch-badge">${ch}</span><div class="ch-name">CH ${ch}</div>
       <div><span class="ch-val">--</span> <span class="ch-unit"></span></div>
       <canvas class="ch-spark" height="44"></canvas>`;
-    // 通道卡原有的徽章就是線標開關：點按開關該通道在主圖的線，不影響記錄與小趨勢圖；
+    // 整張通道卡就是線標開關：點卡片任一處開關該通道在主圖的線，不影響記錄與小趨勢圖；
     // 翻頁重建時狀態以主圖為準，不會把關掉的線偷偷開回來
     const badge = d.querySelector(".ch-badge");
-    badge.classList.toggle("off", !mainChart.isVisible(ch));
-    badge.onclick = () => {
+    const off = !mainChart.isVisible(ch);
+    d.classList.toggle("off", off); badge.classList.toggle("off", off);
+    d.onclick = () => {
       const on = !mainChart.isVisible(ch);
       mainChart.setVisible(ch, on);
-      badge.classList.toggle("off", !on);
+      d.classList.toggle("off", !on); badge.classList.toggle("off", !on);
       mainChart.redraw();
     };
     grid.appendChild(d);

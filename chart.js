@@ -23,34 +23,56 @@ class LineChart {
     new ResizeObserver(() => this.resize()).observe(canvas);
   }
 
+  // 游標所在區：y＝左側 Y 軸條、x＝下方 X 軸條、plot＝圖面、null＝其他邊角
+  zone(x, y) {
+    const pw = this.w - this.padL - this.padR, ph = this.h - this.padT - this.padB;
+    if (pw <= 0 || ph <= 0) return null;
+    const inPlotX = x >= this.padL && x <= this.padL + pw;
+    const inPlotY = y >= this.padT && y <= this.padT + ph;
+    if (inPlotX && inPlotY) return "plot";
+    if (x < this.padL && inPlotY) return "y";
+    if (y > this.padT + ph && inPlotX) return "x";
+    return null;
+  }
+
+  zoomY(fy, factor) {
+    let vMin, vMax;
+    if (this.yZoom) { vMin = this.yZoom.min; vMax = this.yZoom.max; }
+    else if (this._auto) { vMin = this._auto.min; vMax = this._auto.max; }
+    else return;
+    const anchorV = vMin + fy * (vMax - vMin);
+    const autoRange = this._auto ? (this._auto.max - this._auto.min) : (vMax - vMin);
+    let range = (vMax - vMin) * factor;
+    range = Math.min(Math.max(range, autoRange * 0.01), autoRange * 100);
+    this.yZoom = { min: anchorV - fy * range, max: anchorV + (1 - fy) * range };
+  }
+
+  zoomX(fx, factor) {
+    const newView = Math.min(Math.max(this.windowSec * factor, 60), this.retentionSec);
+    if (this.tEnd !== null) {
+      const anchorT = (this.tEnd - this.windowSec) + fx * this.windowSec;
+      this.tEnd = anchorT + (1 - fx) * newView;
+      if (this.tEnd > this._nowT) this.tEnd = this._nowT; // 不得看到未來
+    }
+    this.windowSec = newView;
+  }
+
   bindEvents() {
     const cv = this.cv;
-    // 滾輪同時縮放 X／Y 軸：以游標處為錨點，往上滾放大、往下滾縮小；
-    // 跟隨即時時只改視窗長度（右緣仍是現在），已脫離跟隨時右緣跟著錨點時間移動
+    // 滾輪縮放：軸條上只動該軸（Y 軸條→Y、X 軸條→X），圖面上兩軸一起；
+    // 以游標處為錨點，往上滾放大、往下滾縮小；跟隨即時時 X 只改視窗長度
     cv.addEventListener("wheel", e => {
-      e.preventDefault();
       const r = cv.getBoundingClientRect();
+      const x = e.clientX - (r.left || 0), y = e.clientY - (r.top || 0);
+      const z = this.zone(x, y);
+      if (!z) return; // 邊角不管，頁面照常捲動
+      e.preventDefault();
       const pw = this.w - this.padL - this.padR, ph = this.h - this.padT - this.padB;
-      if (pw <= 0 || ph <= 0) return;
-      const fx = Math.min(Math.max((e.clientX - (r.left || 0) - this.padL) / pw, 0), 1);
-      const fy = Math.min(Math.max((this.padT + ph - (e.clientY - (r.top || 0))) / ph, 0), 1);
-      let vMin, vMax;
-      if (this.yZoom) { vMin = this.yZoom.min; vMax = this.yZoom.max; }
-      else if (this._auto) { vMin = this._auto.min; vMax = this._auto.max; }
-      else return;
-      const anchorV = vMin + fy * (vMax - vMin);
-      const autoRange = this._auto ? (this._auto.max - this._auto.min) : (vMax - vMin);
+      const fx = Math.min(Math.max((x - this.padL) / pw, 0), 1);
+      const fy = Math.min(Math.max((this.padT + ph - y) / ph, 0), 1);
       const factor = e.deltaY > 0 ? 1.25 : 0.8;
-      let range = (vMax - vMin) * factor;
-      range = Math.min(Math.max(range, autoRange * 0.01), autoRange * 100);
-      this.yZoom = { min: anchorV - fy * range, max: anchorV + (1 - fy) * range };
-      const newView = Math.min(Math.max(this.windowSec * factor, 60), this.retentionSec);
-      if (this.tEnd !== null) {
-        const anchorT = (this.tEnd - this.windowSec) + fx * this.windowSec;
-        this.tEnd = anchorT + (1 - fx) * newView;
-        if (this.tEnd > this._nowT) this.tEnd = this._nowT; // 不得看到未來
-      }
-      this.windowSec = newView;
+      if (z === "y" || z === "plot") this.zoomY(fy, factor);
+      if (z === "x" || z === "plot") this.zoomX(fx, factor);
       this.redraw();
     }, { passive: false });
     // 雙擊：Y 回到自動刻度、X 回到即時跟隨＋預設視窗
@@ -58,34 +80,43 @@ class LineChart {
       this.yZoom = null; this.tEnd = null; this.windowSec = this.defaultWindowSec;
       this.redraw();
     });
-    // 拖曳平移：曲線跟著手走（左右移時間、上下移 Y 軸）；
-    // 第一次水平拖曳就脫離即時跟隨（右緣凍結），雙擊回到即時
+    // 拖曳平移只在軸條上：Y 軸條上下移 Y、X 軸條左右移時間（第一次水平拖就脫離即時跟隨）；
+    // 圖面本身不做移動（圖面上按住拖曳無效）
     cv.addEventListener("pointerdown", e => {
+      if (!this._last) return; // 尚未有資料時間，不啟動拖曳
       const r = cv.getBoundingClientRect();
       const x = e.clientX - (r.left || 0), y = e.clientY - (r.top || 0);
-      const pw = this.w - this.padL - this.padR, ph = this.h - this.padT - this.padB;
-      if (x < this.padL || x > this.padL + pw || y < this.padT || y > this.padT + ph) return;
+      const z = this.zone(x, y);
+      if (z !== "x" && z !== "y") return;
       const base = this.yZoom || this._auto;
-      if (!base) return;
-      this.drag = { startX: x, startY: y,
+      this.drag = { axis: z, startX: x, startY: y,
         tEnd0: this.tEnd !== null ? this.tEnd : this._nowT,
-        yMin: base.min, yMax: base.max };
+        yMin: base ? base.min : 0, yMax: base ? base.max : 1 };
       try { cv.setPointerCapture(e.pointerId); } catch (_) {}
       cv.style.cursor = "grabbing";
     });
     cv.addEventListener("pointermove", e => {
-      if (!this.drag) return;
       const r = cv.getBoundingClientRect();
+      const x = e.clientX - (r.left || 0), y = e.clientY - (r.top || 0);
+      if (!this.drag) {
+        // 未拖曳時以游標形狀提示軸條可操作
+        const z = this.zone(x, y);
+        cv.style.cursor = z === "y" ? "ns-resize" : (z === "x" ? "ew-resize" : "");
+        return;
+      }
       const pw = this.w - this.padL - this.padR, ph = this.h - this.padT - this.padB;
       if (pw <= 0 || ph <= 0) return;
-      const dx = (e.clientX - (r.left || 0)) - this.drag.startX;
-      const dy = (e.clientY - (r.top || 0)) - this.drag.startY;
-      if (dx !== 0) {
-        this.tEnd = this.drag.tEnd0 - (dx / pw) * this.windowSec;
-        if (this.tEnd > this._nowT) this.tEnd = this._nowT; // 不得看到未來
+      if (this.drag.axis === "x") {
+        const dx = x - this.drag.startX;
+        if (dx !== 0) {
+          this.tEnd = this.drag.tEnd0 - (dx / pw) * this.windowSec;
+          if (this.tEnd > this._nowT) this.tEnd = this._nowT; // 不得看到未來
+        }
+      } else {
+        const dy = y - this.drag.startY;
+        const shift = dy / ph * (this.drag.yMax - this.drag.yMin);
+        this.yZoom = { min: this.drag.yMin + shift, max: this.drag.yMax + shift };
       }
-      const shift = dy / ph * (this.drag.yMax - this.drag.yMin);
-      this.yZoom = { min: this.drag.yMin + shift, max: this.drag.yMax + shift };
       this.redraw();
     });
     const endDrag = () => { if (this.drag) { this.drag = null; cv.style.cursor = ""; } };
