@@ -75,6 +75,8 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .chart-head .legend { margin-left: auto; }
 .legend { display: flex; gap: 10px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
 #mainChart { width: 100%; height: 420px; display: block; }
+.line-legend { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.line-legend button { min-width: 36px; padding: 4px 8px; }
 .chart-foot { padding: 6px 2px 2px; }
 
 .ch-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }

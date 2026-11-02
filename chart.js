@@ -9,8 +9,11 @@ class LineChart {
     this.padL = 56; this.padR = 12; this.padT = 12; this.padB = 26;
     this.series = new Map();                     // name -> {color, values: [[t,v],...]}
     this.yZoom = null;                           // 手動 Y 軸範圍 {min, max}，null＝自動
+    this.hidden = new Set();                     // 主圖隱藏的通道（線標磚關掉的）
+    this.dragY = null;                           // Y 軸拖曳平移起點
     this._auto = null;                           // 上次自動算出的顯示範圍（含 padding）
     this._last = null;                           // 上次 draw 參數，供縮放重繪用
+    this.cv.style.touchAction = "none";
     this.bindEvents();
     this.resize();
     new ResizeObserver(() => this.resize()).observe(canvas);
@@ -38,6 +41,31 @@ class LineChart {
     }, { passive: false });
     // 雙擊恢復自動刻度
     cv.addEventListener("dblclick", () => { this.yZoom = null; this.redraw(); });
+    // 上下拖曳平移 Y 軸：曲線跟著手走，時間軸維持即時跟隨、不回看歷史
+    cv.addEventListener("pointerdown", e => {
+      const r = cv.getBoundingClientRect();
+      const x = e.clientX - (r.left || 0), y = e.clientY - (r.top || 0);
+      const pw = this.w - this.padL - this.padR, ph = this.h - this.padT - this.padB;
+      if (x < this.padL || x > this.padL + pw || y < this.padT || y > this.padT + ph) return;
+      const base = this.yZoom || this._auto;
+      if (!base) return;
+      this.dragY = { startY: y, min: base.min, max: base.max };
+      try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+      cv.style.cursor = "grabbing";
+    });
+    cv.addEventListener("pointermove", e => {
+      if (!this.dragY) return;
+      const r = cv.getBoundingClientRect();
+      const ph = this.h - this.padT - this.padB;
+      if (ph <= 0) return;
+      const dy = (e.clientY - (r.top || 0)) - this.dragY.startY;
+      const shift = dy / ph * (this.dragY.max - this.dragY.min);
+      this.yZoom = { min: this.dragY.min + shift, max: this.dragY.max + shift };
+      this.redraw();
+    });
+    const endDragY = () => { if (this.dragY) { this.dragY = null; cv.style.cursor = ""; } };
+    cv.addEventListener("pointerup", endDragY);
+    cv.addEventListener("pointercancel", endDragY);
   }
 
   redraw() {
@@ -58,6 +86,11 @@ class LineChart {
     if (!this.series.has(name)) this.series.set(name, { color, values: [] });
     else this.series.get(name).color = color;
   }
+
+  // 線標磚開關：關掉只隱藏主圖的線，不影響記錄與通道卡
+  setVisible(name, on) { if (on) this.hidden.delete(name); else this.hidden.add(name); }
+  isVisible(name) { return !this.hidden.has(name); }
+  resetVisible() { this.hidden.clear(); }
 
   push(name, t, v) {
     const s = this.series.get(name);
@@ -91,9 +124,10 @@ class LineChart {
     if (Number.isFinite(nowT)) this._last = { nowT, yLabel, colorFn };
     else if (this._last) { nowT = this._last.nowT; yLabel = this._last.yLabel; colorFn = this._last.colorFn; }
 
-    // 收集可見範圍與 Y 極值（固定 10 分鐘即時視窗）
+    // 收集可見範圍與 Y 極值（固定 10 分鐘即時視窗；隱藏的通道不參與）
     let tMax = nowT || 0, vMin = Infinity, vMax = -Infinity, hasData = false;
-    for (const [, s] of this.series) {
+    for (const [name, s] of this.series) {
+      if (this.hidden.has(name)) continue;
       for (const [t, v] of s.values) {
         if (t < tMax - this.windowSec) continue;
         hasData = true;
@@ -109,11 +143,13 @@ class LineChart {
     ctx.fillStyle = "#64748b"; ctx.font = "11px Consolas, monospace";
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
 
-    if (!hasData) {
+    const anyVisible = [...this.series.keys()].some(n => !this.hidden.has(n));
+    if (!hasData && (this.series.size === 0 || anyVisible)) {
       ctx.textAlign = "center";
       ctx.fillText("等待資料…", this.padL + pw / 2, this.padT + ph / 2);
       return;
     }
+    if (!hasData) { vMin = 0; vMax = 1; } // 全部通道都關掉時畫空圖區，不顯示等待資料
     if (!(vMax > vMin)) { vMax = vMin + 1; }
     const pad = (vMax - vMin) * 0.08 || 1;
     vMin -= pad; vMax += pad;
@@ -144,7 +180,8 @@ class LineChart {
     ctx.save();
     ctx.beginPath(); ctx.rect(this.padL, this.padT, pw, ph); ctx.clip();
     ctx.lineWidth = 1.6;
-    for (const [, s] of this.series) {
+    for (const [name, s] of this.series) {
+      if (this.hidden.has(name)) continue;
       const pts = s.values.filter(([t]) => t >= tMin);
       for (let i = 1; i < pts.length; i++) {
         const [t0, v0] = pts[i - 1], [t1, v1] = pts[i];

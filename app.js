@@ -381,7 +381,7 @@ function resetKeithleySession() {
   mainChart.clear();
   mainChart.setSeries("K2400", "#38bdf8");
   $("chartTitle").textContent = "即時監控圖 — 電阻 (Ω)";
-  renderChannelGrid();
+  renderChannelGrid(); renderLineLegend();
   $("chartInfo").textContent = "等待量測…";
   $("btnKOutput").textContent = "Output ON";
   $("btnKOutput").classList.remove("danger");
@@ -604,7 +604,7 @@ function resetAgilentSession() {
   mainChart.clear();
   mainChart.setSeries("A34401A", "#a78bfa");
   $("chartTitle").textContent = "即時監控圖 — Agilent 34401A";
-  renderChannelGrid();
+  renderChannelGrid(); renderLineLegend();
   $("chartInfo").textContent = "等待量測…";
   $("btnAMeasure").textContent = "開始量測";
   $("btnAMeasure").classList.remove("danger");
@@ -809,7 +809,7 @@ function handleLine(line) {
       mainChart.setSeries(ch, "#94a3b8");
     }
     log(`自動偵測完成：${S.channels.length} 通道（${S.channels.join(",")}）。`);
-    renderChannelGrid();
+    renderChannelGrid(); renderLineLegend();
     refreshAutoCalChannels();
   }
   const parsed = {};
@@ -928,6 +928,24 @@ function renderChannelGrid() {
   refreshSparks();
 }
 
+/* 主圖線標磚：一通道一磚，預設全選同色（toggle.on）；點按開關該通道在主圖的線，不影響記錄與通道卡 */
+function renderLineLegend() {
+  const el = $("lineLegend"); if (!el) return;
+  el.innerHTML = "";
+  mainChart.resetVisible();
+  for (const ch of S.channels) {
+    const b = document.createElement("button");
+    b.className = "toggle on"; b.textContent = ch; b.dataset.ch = ch;
+    b.addEventListener("click", () => {
+      const on = !mainChart.isVisible(ch);
+      mainChart.setVisible(ch, on);
+      b.classList.toggle("on", on);
+      mainChart.redraw();
+    });
+    el.appendChild(b);
+  }
+}
+
 /* 通道小趨勢圖：取該通道緩衝區最後一段畫迷你折線 */
 function drawSpark(cv, vals, color) {
   if (!cv) return;
@@ -1000,8 +1018,8 @@ function resetSession() {
     r0: {}, hasR0: false, csvRows: [], lineBuf: "",
     segStart: performance.now(), segFileHandle: null, calDone: [],
   });
-  mainChart.clear();
-  $("chGrid").innerHTML = "";
+  mainChart.clear(); mainChart.resetVisible();
+  $("chGrid").innerHTML = ""; $("lineLegend").innerHTML = "";
   $("chartInfo").textContent = "等待資料…";
   if (S.recording) stopRecording(false);
   updateCalIndicators(); updateWorkflowUI();
