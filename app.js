@@ -78,7 +78,8 @@ function pushBuf(arr, v) { arr.push(v); if (arr.length > MAXP) arr.shift(); }
 /* ---------------- 圖表 ---------------- */
 let mainChart;
 function initCharts() {
-  mainChart = new LineChart($("mainChart"), { windowSec: 600 });
+  mainChart = new LineChart($("mainChart"), { windowSec: 600, liveBtn: $("btnChartLive") });
+  $("btnChartLive").addEventListener("click", () => mainChart.backToLive());
 }
 
 /* ---------------- 序列埠 ---------------- */
