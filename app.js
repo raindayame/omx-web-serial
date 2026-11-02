@@ -1253,14 +1253,49 @@ function updateRecUI() {
   if (st) { st.textContent = S.recording ? "● 紀錄中" : "未記錄"; st.classList.toggle("rec-on", S.recording); }
   updateWorkflowUI();
 }
-function stopRecording(download = true) {
+async function writeTextToDir(dir, filename, text) {
+  const h = await dir.getFileHandle(filename, { create: true });
+  const w = await h.createWritable();
+  await w.write(text);
+  await w.close();
+}
+async function stopRecording(download = true) {
   if (!S.recording) return;
   S.recording = false;
   updateRecUI();
   if (download && S.recResRows.length) {
-    downloadCSV(`gas_resistance_${stamp()}.csv`, S.recResRows);
-    downloadCSV(`gas_senstivity_${stamp()}.csv`, S.recSensRows);
-    log(`記錄停止，已下載 ${S.recResRows.length} 筆。`);
+    const n = S.recResRows.length;
+    const st = stamp();
+    const resName = `gas_resistance_${st}.csv`;
+    const sensName = `gas_senstivity_${st}.csv`;
+    // 兩檔只問一次位置：已選過分段資料夾就直接寫入該夾，否則彈一次
+    // 資料夾選擇、兩檔都寫進去；資料夾寫入不可用或被取消時，才退回
+    // 原本的兩次自動下載，避免資料沒存到。
+    let saved = false, cancelled = false;
+    const tryDir = async (dir) => {
+      await writeTextToDir(dir, resName, buildCSVText(S.recResRows));
+      await writeTextToDir(dir, sensName, buildCSVText(S.recSensRows));
+      log(`記錄停止，已寫入 ${dir.name}：${resName}、${sensName}（${n} 筆）。`);
+    };
+    if ("showDirectoryPicker" in window) {
+      try {
+        if (S.dirHandle) { await tryDir(S.dirHandle); saved = true; }
+      } catch (e) { log(`寫入已選資料夾失敗：${e.message}，改請選擇資料夾。`); }
+      if (!saved) {
+        try {
+          const dir = await window.showDirectoryPicker({ mode: "readwrite" });
+          await tryDir(dir); saved = true;
+        } catch (e) {
+          if (e.name === "AbortError") { cancelled = true; log("儲存已取消，記錄資料未寫出。"); }
+          else log(`寫入資料夾失敗，改用下載：${e.message}`);
+        }
+      }
+    }
+    if (!saved && !cancelled) {
+      downloadCSV(resName, S.recResRows);
+      downloadCSV(sensName, S.recSensRows);
+      log(`記錄停止，已下載 ${n} 筆。`);
+    }
   }
   S.recResRows = []; S.recSensRows = [];
 }
