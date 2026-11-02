@@ -40,7 +40,7 @@ const store = {
 /* ---------------- 狀態 ---------------- */
 const S = {
   port: null, reader: null, writer: null, keepReading: false,
-  connected: false,
+  connected: false, reconnecting: false, reconnectTimer: null, reconnectBusy: false,
   instrument: "esp32",
   ws: null, kLink: "serial", rpcSeq: 0, rpcWait: {},
   channels: [], hasData: false,
@@ -111,6 +111,7 @@ async function esp32Setup(port, baudRate) {
 }
 
 async function connectSerial() {
+  stopAutoReconnect(); // 手動連接走新場次流程，不跟自動重連搶埠
   if (S.instrument !== "esp32" && $("connModeSel").value === "gpib") {
     S.kLink = "gpib";
     try { await connectGpib(); }
@@ -133,7 +134,62 @@ async function connectSerial() {
   }
 }
 
+/* ---------------- 拔線自動重連（僅 ESP32 Web Serial） ----------------
+ * 舊版 Python 後端的做法搬到網頁版，但改掉一個關鍵差異：舊程式只重試
+ * 原本的 COM 埠號，重插若換了埠號就永遠接不回去。網頁版改為每 3 秒用
+ * getPorts() 看目前已授權的埠（重插後出現的是新埠物件），接上就續用
+ * 原場次：通道、R0、記錄狀態、資料夾分段檔都不重置，記錄續寫同一檔；
+ * ESP32 斷電重啟後校正值會回到韌體預設，所以接回來後把本場次已校好的
+ * S.adc 送回裝置。手動按「斷開並換裝置」、切換儀器、手動按連接，都會
+ * 停掉自動重連（手動連接走原本的新場次流程）。 */
+function stopAutoReconnect() {
+  S.reconnecting = false;
+  if (S.reconnectTimer) { clearTimeout(S.reconnectTimer); S.reconnectTimer = null; }
+}
+async function tryAutoReconnect() {
+  if (!S.reconnecting || S.reconnectBusy || S.connected) return;
+  S.reconnectBusy = true;
+  try {
+    const baudRate = parseInt($("baudSel").value, 10);
+    const ports = await navigator.serial.getPorts();
+    for (const port of ports) {
+      try {
+        await port.open({ baudRate });
+        S.port = port;
+        S.writer = port.writable.getWriter();
+        S.connected = true; S.keepReading = true;
+        stopAutoReconnect();
+        updateConnUI();
+        log("自動重連成功，恢復數據接收。");
+        if (S.calDone.length) {
+          try { await sendAdcValues(S.adc); log("已將本場次校正值送回裝置。"); }
+          catch (e) { log(`校正值送回失敗：${e.message}，請手動重跑自動校正。`); }
+        }
+        readLoop();
+        return;
+      } catch { /* 這個埠開不了就試下一個 */ }
+    }
+  } catch { /* 下一輪再試 */ }
+  finally { S.reconnectBusy = false; }
+  if (S.reconnecting) S.reconnectTimer = setTimeout(tryAutoReconnect, 3000);
+}
+async function handleUnexpectedDisconnect() {
+  if (!S.connected || S.reconnecting) return;
+  if (S.instrument !== "esp32" || S.kLink === "gpib") { log("裝置已拔除。"); disconnectSerial(); return; }
+  S.reconnecting = true; // 先佔旗標，避免 disconnect 事件與讀取錯誤兩路重複觸發
+  S.keepReading = false;
+  try { if (S.reader) await S.reader.cancel(); } catch {}
+  try { if (S.writer) S.writer.releaseLock(); } catch {}
+  try { if (S.port) await S.port.close(); } catch {}
+  S.reader = null; S.writer = null; S.port = null;
+  S.connected = false;
+  updateConnUI();
+  log("裝置已拔除，自動重連中（每 3 秒重試；按「斷開並換裝置」可停止）…");
+  tryAutoReconnect();
+}
+
 async function disconnectSerial() {
+  stopAutoReconnect();
   S.keepReading = false;
   if (S.instrument === "agilent") S.a.measuring = false;
   // Keithley：先關 Output 並驗證（安全）
@@ -704,7 +760,10 @@ async function readLoop() {
       if (value) handleText(value);
     }
   } catch (e) {
-    if (S.keepReading) log(`讀取中斷：${e.message}`);
+    if (S.keepReading) {
+      if (S.instrument === "esp32" && S.kLink !== "gpib") handleUnexpectedDisconnect();
+      else log(`讀取中斷：${e.message}`);
+    }
   }
 }
 
@@ -912,9 +971,9 @@ function refreshSparks() {
 /* ---------------- 連線 UI ---------------- */
 function updateConnUI() {
   $("btnConnect").disabled = S.connected;
-  $("btnDisconnect").disabled = !S.connected;
+  $("btnDisconnect").disabled = !S.connected && !S.reconnecting; // 重連中也要能手動斷開停止
   $("connStatus").classList.toggle("on", S.connected);
-  $("connText").textContent = S.connected ? "已連線" : "未連線";
+  $("connText").textContent = S.connected ? "已連線" : (S.reconnecting ? "重連中…" : "未連線");
   updateWorkflowUI();
 }
 // 流程顏色提醒（只提醒，不擋操作）：連上後自動校正亮主色；四組全校完換開始記錄亮主色；記錄中兩者都回復原色
@@ -1438,13 +1497,13 @@ function bindEvents() {
   $("btnAMeasure").onclick = aToggleMeasure;
   $("btnAExcel").onclick = aExportExcel;
 
-  // 實體拔線時自動更新連線狀態
+  // 實體拔線時進自動重連（不斷場次、不重置記錄）；重插出現新埠時立刻重試
   if ("serial" in navigator && navigator.serial.addEventListener) {
     navigator.serial.addEventListener("disconnect", () => {
-      if (S.connected) {
-        log("裝置已拔除。");
-        disconnectSerial();
-      }
+      if (S.connected) handleUnexpectedDisconnect();
+    });
+    navigator.serial.addEventListener("connect", () => {
+      if (S.reconnecting) tryAutoReconnect();
     });
   }
 
@@ -1616,7 +1675,12 @@ function loadSettings() {
     S.k.comp = c.kComp; $("kComp").value = c.kComp;
   }
   if (c.interval) { S.interval = c.interval; $("intervalInput").value = c.interval; }
-  if (c.segMs) { S.segMs = c.segMs; $("segSel").value = String(c.segMs); }
+  if (c.segMs) {
+    // 1 小時選項已移除：舊設定自動遷移為 30 分鐘
+    S.segMs = c.segMs === 3600000 ? 1800000 : c.segMs;
+    $("segSel").value = String(S.segMs);
+    if ($("segSel").value !== String(S.segMs)) { S.segMs = 0; $("segSel").value = "0"; }
+  }
   if (Array.isArray(c.adc) && c.adc.length === 4) {
     S.adc = c.adc;
   }
