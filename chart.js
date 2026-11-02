@@ -1,16 +1,20 @@
-/* Canvas 圖表渲染：即時跟隨、滾輪縮放 Y 軸刻度、多通道、PASS 光譜著色 */
+/* Canvas 圖表渲染：即時跟隨、滾輪縮放 X／Y 軸、拖曳平移、多通道、PASS 光譜著色 */
 "use strict";
 
 class LineChart {
   constructor(canvas, opts = {}) {
     this.cv = canvas;
     this.ctx = canvas.getContext("2d");
-    this.windowSec = opts.windowSec || 600;      // 10 分鐘即時視窗
+    this.defaultWindowSec = opts.windowSec || 600; // 預設 X 視窗：10 分鐘
+    this.windowSec = this.defaultWindowSec;      // 目前 X 視窗長度（滾輪可縮放 60 秒–4 小時）
+    this.retentionSec = 14400;                   // 資料保留 4 小時，供 X 縮放／平移回看
+    this.tEnd = null;                            // X 右緣：null＝跟隨即時，否則為凍結的絕對時間
+    this._nowT = 0;                              // 最近一次 draw 的即時時間（供平移夾制用）
     this.padL = 56; this.padR = 12; this.padT = 12; this.padB = 26;
     this.series = new Map();                     // name -> {color, values: [[t,v],...]}
     this.yZoom = null;                           // 手動 Y 軸範圍 {min, max}，null＝自動
-    this.hidden = new Set();                     // 主圖隱藏的通道（線標磚關掉的）
-    this.dragY = null;                           // Y 軸拖曳平移起點
+    this.hidden = new Set();                     // 主圖隱藏的通道（通道卡徽章關掉的）
+    this.drag = null;                            // 拖曳平移起點（X＋Y 一起移）
     this._auto = null;                           // 上次自動算出的顯示範圍（含 padding）
     this._last = null;                           // 上次 draw 參數，供縮放重繪用
     this.cv.style.touchAction = "none";
@@ -21,27 +25,41 @@ class LineChart {
 
   bindEvents() {
     const cv = this.cv;
-    // 滾輪縮放 Y 軸：以游標處的數值為錨點，往上滾放大、往下滾縮小
+    // 滾輪同時縮放 X／Y 軸：以游標處為錨點，往上滾放大、往下滾縮小；
+    // 跟隨即時時只改視窗長度（右緣仍是現在），已脫離跟隨時右緣跟著錨點時間移動
     cv.addEventListener("wheel", e => {
       e.preventDefault();
       const r = cv.getBoundingClientRect();
-      const ph = this.h - this.padT - this.padB;
-      if (ph <= 0) return;
-      const f = Math.min(Math.max((this.padT + ph - (e.clientY - (r.top || 0))) / ph, 0), 1);
+      const pw = this.w - this.padL - this.padR, ph = this.h - this.padT - this.padB;
+      if (pw <= 0 || ph <= 0) return;
+      const fx = Math.min(Math.max((e.clientX - (r.left || 0) - this.padL) / pw, 0), 1);
+      const fy = Math.min(Math.max((this.padT + ph - (e.clientY - (r.top || 0))) / ph, 0), 1);
       let vMin, vMax;
       if (this.yZoom) { vMin = this.yZoom.min; vMax = this.yZoom.max; }
       else if (this._auto) { vMin = this._auto.min; vMax = this._auto.max; }
       else return;
-      const anchor = vMin + f * (vMax - vMin);
+      const anchorV = vMin + fy * (vMax - vMin);
       const autoRange = this._auto ? (this._auto.max - this._auto.min) : (vMax - vMin);
-      let range = (vMax - vMin) * (e.deltaY > 0 ? 1.25 : 0.8);
+      const factor = e.deltaY > 0 ? 1.25 : 0.8;
+      let range = (vMax - vMin) * factor;
       range = Math.min(Math.max(range, autoRange * 0.01), autoRange * 100);
-      this.yZoom = { min: anchor - f * range, max: anchor + (1 - f) * range };
+      this.yZoom = { min: anchorV - fy * range, max: anchorV + (1 - fy) * range };
+      const newView = Math.min(Math.max(this.windowSec * factor, 60), this.retentionSec);
+      if (this.tEnd !== null) {
+        const anchorT = (this.tEnd - this.windowSec) + fx * this.windowSec;
+        this.tEnd = anchorT + (1 - fx) * newView;
+        if (this.tEnd > this._nowT) this.tEnd = this._nowT; // 不得看到未來
+      }
+      this.windowSec = newView;
       this.redraw();
     }, { passive: false });
-    // 雙擊恢復自動刻度
-    cv.addEventListener("dblclick", () => { this.yZoom = null; this.redraw(); });
-    // 上下拖曳平移 Y 軸：曲線跟著手走，時間軸維持即時跟隨、不回看歷史
+    // 雙擊：Y 回到自動刻度、X 回到即時跟隨＋預設視窗
+    cv.addEventListener("dblclick", () => {
+      this.yZoom = null; this.tEnd = null; this.windowSec = this.defaultWindowSec;
+      this.redraw();
+    });
+    // 拖曳平移：曲線跟著手走（左右移時間、上下移 Y 軸）；
+    // 第一次水平拖曳就脫離即時跟隨（右緣凍結），雙擊回到即時
     cv.addEventListener("pointerdown", e => {
       const r = cv.getBoundingClientRect();
       const x = e.clientX - (r.left || 0), y = e.clientY - (r.top || 0);
@@ -49,23 +67,30 @@ class LineChart {
       if (x < this.padL || x > this.padL + pw || y < this.padT || y > this.padT + ph) return;
       const base = this.yZoom || this._auto;
       if (!base) return;
-      this.dragY = { startY: y, min: base.min, max: base.max };
+      this.drag = { startX: x, startY: y,
+        tEnd0: this.tEnd !== null ? this.tEnd : this._nowT,
+        yMin: base.min, yMax: base.max };
       try { cv.setPointerCapture(e.pointerId); } catch (_) {}
       cv.style.cursor = "grabbing";
     });
     cv.addEventListener("pointermove", e => {
-      if (!this.dragY) return;
+      if (!this.drag) return;
       const r = cv.getBoundingClientRect();
-      const ph = this.h - this.padT - this.padB;
-      if (ph <= 0) return;
-      const dy = (e.clientY - (r.top || 0)) - this.dragY.startY;
-      const shift = dy / ph * (this.dragY.max - this.dragY.min);
-      this.yZoom = { min: this.dragY.min + shift, max: this.dragY.max + shift };
+      const pw = this.w - this.padL - this.padR, ph = this.h - this.padT - this.padB;
+      if (pw <= 0 || ph <= 0) return;
+      const dx = (e.clientX - (r.left || 0)) - this.drag.startX;
+      const dy = (e.clientY - (r.top || 0)) - this.drag.startY;
+      if (dx !== 0) {
+        this.tEnd = this.drag.tEnd0 - (dx / pw) * this.windowSec;
+        if (this.tEnd > this._nowT) this.tEnd = this._nowT; // 不得看到未來
+      }
+      const shift = dy / ph * (this.drag.yMax - this.drag.yMin);
+      this.yZoom = { min: this.drag.yMin + shift, max: this.drag.yMax + shift };
       this.redraw();
     });
-    const endDragY = () => { if (this.dragY) { this.dragY = null; cv.style.cursor = ""; } };
-    cv.addEventListener("pointerup", endDragY);
-    cv.addEventListener("pointercancel", endDragY);
+    const endDrag = () => { if (this.drag) { this.drag = null; cv.style.cursor = ""; } };
+    cv.addEventListener("pointerup", endDrag);
+    cv.addEventListener("pointercancel", endDrag);
   }
 
   redraw() {
@@ -96,12 +121,16 @@ class LineChart {
     const s = this.series.get(name);
     if (!s) return;
     s.values.push([t, v]);
-    const cutoff = t - this.windowSec;
+    const cutoff = t - this.retentionSec; // 保留 4 小時，不以目前視窗長度修剪
     while (s.values.length && s.values[0][0] < cutoff) s.values.shift();
-    if (s.values.length > 3600) s.values.splice(0, s.values.length - 3600);
+    if (s.values.length > 15000) s.values.splice(0, s.values.length - 15000);
   }
 
-  clear() { this.series.clear(); this.yZoom = null; this.draw(); }
+  clear() {
+    this.series.clear();
+    this.yZoom = null; this.tEnd = null; this.windowSec = this.defaultWindowSec;
+    this.draw();
+  }
 
   /* value -> 顏色：光譜（藍→紅），超出範圍回傳 null（畫灰色） */
   static spectrumColor(v, min, max) {
@@ -121,11 +150,11 @@ class LineChart {
     const pw = W - this.padL - this.padR, ph = H - this.padT - this.padB;
     if (pw <= 0 || ph <= 0) return;
 
-    if (Number.isFinite(nowT)) this._last = { nowT, yLabel, colorFn };
+    if (Number.isFinite(nowT)) { this._last = { nowT, yLabel, colorFn }; this._nowT = nowT; }
     else if (this._last) { nowT = this._last.nowT; yLabel = this._last.yLabel; colorFn = this._last.colorFn; }
 
-    // 收集可見範圍與 Y 極值（固定 10 分鐘即時視窗；隱藏的通道不參與）
-    let tMax = nowT || 0, vMin = Infinity, vMax = -Infinity, hasData = false;
+    // 收集可見範圍與 Y 極值（跟隨即時時右緣＝現在，拖曳／縮放脫離後右緣凍結；隱藏的通道不參與）
+    let tMax = this.tEnd !== null ? this.tEnd : (nowT || 0), vMin = Infinity, vMax = -Infinity, hasData = false;
     for (const [name, s] of this.series) {
       if (this.hidden.has(name)) continue;
       for (const [t, v] of s.values) {
@@ -166,9 +195,9 @@ class LineChart {
       ctx.beginPath(); ctx.moveTo(this.padL, y); ctx.lineTo(this.padL + pw, y); ctx.stroke();
       ctx.fillText(v >= 100 ? v.toFixed(0) : v.toFixed(2), this.padL - 6, y);
     }
-    // X 時間標籤（每 2 分鐘）
+    // X 時間標籤（間隔隨視窗長度自適應，約 6–8 個標籤）
     ctx.textAlign = "center"; ctx.textBaseline = "top";
-    const step = 120;
+    const step = [10, 30, 60, 120, 300, 600, 1800, 3600].find(s => this.windowSec / s <= 8) || 3600;
     const firstTick = Math.ceil(tMin / step) * step;
     for (let t = firstTick; t <= tMax; t += step) {
       const m = Math.floor(t / 60), s = Math.floor(t % 60);
@@ -192,5 +221,11 @@ class LineChart {
       }
     }
     ctx.restore();
+    // 脫離即時跟隨時提示（雙擊回到即時）
+    if (this.tEnd !== null) {
+      ctx.textAlign = "right"; ctx.textBaseline = "top";
+      ctx.fillStyle = "#fbbf24"; ctx.font = "11px Consolas, monospace";
+      ctx.fillText("已脫離即時跟隨，雙擊回到即時", this.padL + pw - 4, this.padT + 4);
+    }
   }
 }

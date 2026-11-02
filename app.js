@@ -39,7 +39,7 @@ const store = {
 
 /* ---------------- 狀態 ---------------- */
 const S = {
-  port: null, reader: null, writer: null, keepReading: false,
+  port: null, reader: null, writer: null, keepReading: false, readGen: 0, failedPort: null,
   connected: false, reconnecting: false, reconnectTimer: null, reconnectBusy: false,
   instrument: "esp32",
   ws: null, kLink: "serial", rpcSeq: 0, rpcWait: {},
@@ -152,12 +152,17 @@ async function tryAutoReconnect() {
   try {
     const baudRate = parseInt($("baudSel").value, 10);
     const ports = await navigator.serial.getPorts();
-    for (const port of ports) {
+    // 重插後的新埠通常排在後面，先試；上次讀取失敗的埠放最後（舊埠物件可能還在清單裡，
+    // 先試它會立刻讀取失敗又跳回重連中，造成已連線／重連中來回翻）
+    const ordered = [...ports].reverse();
+    ordered.sort((a, b) => (a === S.failedPort ? 1 : 0) - (b === S.failedPort ? 1 : 0));
+    for (const port of ordered) {
       try {
         await port.open({ baudRate });
         S.port = port;
         S.writer = port.writable.getWriter();
         S.connected = true; S.keepReading = true;
+        S.failedPort = null;
         stopAutoReconnect();
         updateConnUI();
         log("自動重連成功，恢復數據接收。");
@@ -177,14 +182,17 @@ async function handleUnexpectedDisconnect() {
   if (!S.connected || S.reconnecting) return;
   if (S.instrument !== "esp32" || S.kLink === "gpib") { log("裝置已拔除。"); disconnectSerial(); return; }
   S.reconnecting = true; // 先佔旗標，避免 disconnect 事件與讀取錯誤兩路重複觸發
+  S.readGen++; // 作廢舊 readLoop：舊迴圈事後出錯不得再殺掉已接回的好連線
   S.keepReading = false;
-  try { if (S.reader) await S.reader.cancel(); } catch {}
+  const closeTimeout = new Promise(r => setTimeout(r, 2000)); // close 卡住時不讓重連永遠等不到
+  try { if (S.reader) await Promise.race([S.reader.cancel(), closeTimeout]); } catch {}
   try { if (S.writer) S.writer.releaseLock(); } catch {}
-  try { if (S.port) await S.port.close(); } catch {}
+  try { if (S.port) await Promise.race([S.port.close(), closeTimeout]); } catch {}
+  S.failedPort = S.port; // 下一輪重連先試別的埠，這個放最後
   S.reader = null; S.writer = null; S.port = null;
   S.connected = false;
   updateConnUI();
-  log("裝置已拔除，自動重連中（每 3 秒重試；按「斷開並換裝置」可停止）…");
+  log("連線異常，自動重連中（每 3 秒重試；按「斷開並換裝置」可停止）…");
   tryAutoReconnect();
 }
 
@@ -381,7 +389,7 @@ function resetKeithleySession() {
   mainChart.clear();
   mainChart.setSeries("K2400", "#38bdf8");
   $("chartTitle").textContent = "即時監控圖 — 電阻 (Ω)";
-  renderChannelGrid(); renderLineLegend();
+  mainChart.resetVisible(); renderChannelGrid();
   $("chartInfo").textContent = "等待量測…";
   $("btnKOutput").textContent = "Output ON";
   $("btnKOutput").classList.remove("danger");
@@ -604,7 +612,7 @@ function resetAgilentSession() {
   mainChart.clear();
   mainChart.setSeries("A34401A", "#a78bfa");
   $("chartTitle").textContent = "即時監控圖 — Agilent 34401A";
-  renderChannelGrid(); renderLineLegend();
+  mainChart.resetVisible(); renderChannelGrid();
   $("chartInfo").textContent = "等待量測…";
   $("btnAMeasure").textContent = "開始量測";
   $("btnAMeasure").classList.remove("danger");
@@ -750,19 +758,22 @@ async function aExportExcel() {
 }
 
 async function readLoop() {
+  const myGen = ++S.readGen; // 世代戳：重連後舊迴圈的錯誤不得觸發新連線的重連
   const decoder = new TextDecoderStream();
   S.port.readable.pipeTo(decoder.writable).catch(() => {});
   S.reader = decoder.readable.getReader();
   try {
-    while (S.keepReading) {
+    while (S.keepReading && myGen === S.readGen) {
       const { value, done } = await S.reader.read();
       if (done) break;
       if (value) handleText(value);
     }
   } catch (e) {
-    if (S.keepReading) {
-      if (S.instrument === "esp32" && S.kLink !== "gpib") handleUnexpectedDisconnect();
-      else log(`讀取中斷：${e.message}`);
+    if (S.keepReading && myGen === S.readGen) {
+      if (S.instrument === "esp32" && S.kLink !== "gpib") {
+        log(`讀取錯誤：${e.message}，進入自動重連。`);
+        handleUnexpectedDisconnect();
+      } else log(`讀取中斷：${e.message}`);
     }
   }
 }
@@ -809,7 +820,7 @@ function handleLine(line) {
       mainChart.setSeries(ch, "#94a3b8");
     }
     log(`自動偵測完成：${S.channels.length} 通道（${S.channels.join(",")}）。`);
-    renderChannelGrid(); renderLineLegend();
+    mainChart.resetVisible(); renderChannelGrid();
     refreshAutoCalChannels();
   }
   const parsed = {};
@@ -920,30 +931,22 @@ function renderChannelGrid() {
   for (const ch of list) {
     const d = document.createElement("div");
     d.className = "ch-card"; d.dataset.ch = ch;
-    d.innerHTML = `<span class="ch-badge">${ch}</span><div class="ch-name">CH ${ch}</div>
+    d.innerHTML = `<span class="ch-badge" title="點按開關主圖線顯示">${ch}</span><div class="ch-name">CH ${ch}</div>
       <div><span class="ch-val">--</span> <span class="ch-unit"></span></div>
       <canvas class="ch-spark" height="44"></canvas>`;
+    // 通道卡原有的徽章就是線標開關：點按開關該通道在主圖的線，不影響記錄與小趨勢圖；
+    // 翻頁重建時狀態以主圖為準，不會把關掉的線偷偷開回來
+    const badge = d.querySelector(".ch-badge");
+    badge.classList.toggle("off", !mainChart.isVisible(ch));
+    badge.onclick = () => {
+      const on = !mainChart.isVisible(ch);
+      mainChart.setVisible(ch, on);
+      badge.classList.toggle("off", !on);
+      mainChart.redraw();
+    };
     grid.appendChild(d);
   }
   refreshSparks();
-}
-
-/* 主圖線標磚：一通道一磚，預設全選同色（toggle.on）；點按開關該通道在主圖的線，不影響記錄與通道卡 */
-function renderLineLegend() {
-  const el = $("lineLegend"); if (!el) return;
-  el.innerHTML = "";
-  mainChart.resetVisible();
-  for (const ch of S.channels) {
-    const b = document.createElement("button");
-    b.className = "toggle on"; b.textContent = ch; b.dataset.ch = ch;
-    b.addEventListener("click", () => {
-      const on = !mainChart.isVisible(ch);
-      mainChart.setVisible(ch, on);
-      b.classList.toggle("on", on);
-      mainChart.redraw();
-    });
-    el.appendChild(b);
-  }
 }
 
 /* 通道小趨勢圖：取該通道緩衝區最後一段畫迷你折線 */
@@ -1019,7 +1022,7 @@ function resetSession() {
     segStart: performance.now(), segFileHandle: null, calDone: [],
   });
   mainChart.clear(); mainChart.resetVisible();
-  $("chGrid").innerHTML = ""; $("lineLegend").innerHTML = "";
+  $("chGrid").innerHTML = "";
   $("chartInfo").textContent = "等待資料…";
   if (S.recording) stopRecording(false);
   updateCalIndicators(); updateWorkflowUI();
@@ -1552,8 +1555,9 @@ function bindEvents() {
 
   // 實體拔線時進自動重連（不斷場次、不重置記錄）；重插出現新埠時立刻重試
   if ("serial" in navigator && navigator.serial.addEventListener) {
-    navigator.serial.addEventListener("disconnect", () => {
-      if (S.connected) handleUnexpectedDisconnect();
+    navigator.serial.addEventListener("disconnect", (e) => {
+      // 只認目前正在用的埠：舊埠物件的遲到事件不得殺掉已接回的好連線
+      if (S.connected && e.target === S.port) handleUnexpectedDisconnect();
     });
     navigator.serial.addEventListener("connect", () => {
       if (S.reconnecting) tryAutoReconnect();
