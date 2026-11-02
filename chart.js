@@ -59,20 +59,20 @@ class LineChart {
 
   bindEvents() {
     const cv = this.cv;
-    // 滾輪縮放：軸條上只動該軸（Y 軸條→Y、X 軸條→X），圖面上兩軸一起；
+    // 滾輪縮放只在軸條上：Y 軸條→Y、X 軸條→X；圖面與邊角不管，頁面照常捲動
     // 以游標處為錨點，往上滾放大、往下滾縮小；跟隨即時時 X 只改視窗長度
     cv.addEventListener("wheel", e => {
       const r = cv.getBoundingClientRect();
       const x = e.clientX - (r.left || 0), y = e.clientY - (r.top || 0);
       const z = this.zone(x, y);
-      if (!z) return; // 邊角不管，頁面照常捲動
+      if (z !== "x" && z !== "y") return;
       e.preventDefault();
       const pw = this.w - this.padL - this.padR, ph = this.h - this.padT - this.padB;
       const fx = Math.min(Math.max((x - this.padL) / pw, 0), 1);
       const fy = Math.min(Math.max((this.padT + ph - y) / ph, 0), 1);
       const factor = e.deltaY > 0 ? 1.25 : 0.8;
-      if (z === "y" || z === "plot") this.zoomY(fy, factor);
-      if (z === "x" || z === "plot") this.zoomX(fx, factor);
+      if (z === "y") this.zoomY(fy, factor);
+      if (z === "x") this.zoomX(fx, factor);
       this.redraw();
     }, { passive: false });
     // 雙擊：Y 回到自動刻度、X 回到即時跟隨＋預設視窗
