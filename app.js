@@ -51,7 +51,7 @@ const S = {
   mode: "RESISTANCE",
   csvRows: [], recording: false, recResRows: [], recSensRows: [],
   timerSec: 0, timerRunning: false,
-  chPage: 0,
+  chPage: 0, chView: "page",
   dirHandle: null, segMs: 0, segStart: 0, segBusy: false, segFileHandle: null,
   events: [],
   k: {
@@ -817,7 +817,7 @@ function handleLine(line) {
     S.hasData = true;
     for (const ch of S.channels) {
       S.accum[ch] = []; S.dataBuf[ch] = []; S.sensBuf[ch] = [];
-      mainChart.setSeries(ch, "#94a3b8");
+      mainChart.setSeries(ch, channelColorOf(ch));
     }
     log(`自動偵測完成：${S.channels.length} 通道（${S.channels.join(",")}）。`);
     mainChart.resetVisible(); renderChannelGrid();
@@ -884,11 +884,37 @@ function judge(value) {
   return value >= r.min && value <= r.max ? "pass" : "fail";
 }
 
-function channelColor(value) {
-  const r = activeRule();
-  if (!r.enabled) return "#94a3b8";
-  const c = LineChart.spectrumColor(value, r.min, r.max);
-  return c || "#475569";   // NO PASS -> 灰
+function channelColorOf(ch) {
+  // 每通道固定一色：依通道順序用黃金角取色，32 通道不重複色相
+  const i = S.channels.indexOf(ch);
+  if (i < 0) return "#94a3b8";
+  return `hsl(${Math.round((i * 137.5) % 360)}, 80%, 60%)`;
+}
+
+// 主圖線段色：通道固定色；判定規則啟用且該段為 NO PASS 時變灰
+function segmentColor(ch, value) {
+  if (activeRule().enabled && judge(value) === "fail") return "#475569";
+  return channelColorOf(ch);
+}
+
+// 主圖分頁與通道卡共用同一頁（btnChPrev / btnChNext）；btnChAll 切回全部通道
+function applyChartPage() {
+  if (!S.channels.length || S.chView === "all") { mainChart.pageSet = null; }
+  else { const s = S.chPage * 16; mainChart.pageSet = new Set(S.channels.slice(s, s + 16)); }
+  renderChartLegend();
+  mainChart.redraw();
+}
+
+function renderChartLegend() {
+  const el = $("chartLegend"); if (!el) return;
+  const list = S.channels.length
+    ? (S.chView === "all" ? S.channels : S.channels.slice(S.chPage * 16, S.chPage * 16 + 16))
+    : [...mainChart.series.keys()];
+  el.innerHTML = list.map((ch) => {
+    const base = S.channels.includes(ch) ? channelColorOf(ch) : (mainChart.series.get(ch)?.color || "#94a3b8");
+    const dim = !mainChart.isVisible(ch);
+    return `<span style="color:${dim ? "#64748b" : base}">${dim ? "□" : "■"} ${ch}</span>`;
+  }).join("");
 }
 
 function updateLiveUI(avg, sens, avgT, avgH, recordSec) {
@@ -911,26 +937,32 @@ function updateLiveUI(avg, sens, avgT, avgH, recordSec) {
   }
   refreshSparks();
 
-  // 主圖
-  const colorFn = activeRule().enabled ? (v) => channelColor(v) : null;
+  // 主圖：每通道固定色，NO PASS 線段變灰
+  const colorFn = (name, v) => segmentColor(name, v);
   mainChart.draw(recordSec, S.mode === "SENSITIVITY" ? "靈敏度 R/R0" : "電阻 kΩ", colorFn);
 
   const mm = String(Math.floor(recordSec / 60)).padStart(2, "0");
   const ss = String(recordSec % 60).padStart(2, "0");
+  const pg = S.channels.length > 16
+    ? (S.chView === "all" ? ` · 主圖 (1–${S.channels.length})`
+      : ` · 主圖 (${S.chPage * 16 + 1}–${Math.min((S.chPage + 1) * 16, S.channels.length)})`) : "";
   $("chartInfo").textContent =
     `已記錄 ${S.timeBuf.length} 點 · 經過 ${mm}:${ss} · ${S.channels.length} 通道 · ` +
-    (S.recording ? "● 記錄中" : "未記錄");
+    (S.recording ? "● 記錄中" : "未記錄") + pg;
 }
 
 function renderChannelGrid() {
   const grid = $("chGrid");
   grid.innerHTML = "";
-  const start = S.chPage * 16;
-  const list = S.channels.slice(start, start + 16);
-  $("chPageLabel").textContent = S.channels.length > 16 ? `(${start + 1}–${start + list.length})` : "";
+  const isAll = S.chView === "all";
+  const start = isAll ? 0 : S.chPage * 16;
+  const list = isAll ? S.channels : S.channels.slice(start, start + 16);
+  $("chPageLabel").textContent = S.channels.length > 16
+    ? (isAll ? `(1–${S.channels.length})` : `(${start + 1}–${start + list.length})`) : "";
   for (const ch of list) {
     const d = document.createElement("div");
     d.className = "ch-card"; d.dataset.ch = ch; d.title = "點按開關主圖線顯示";
+    d.style.borderLeft = `4px solid ${channelColorOf(ch)}`;
     d.innerHTML = `<span class="ch-badge">${ch}</span><div class="ch-name">CH ${ch}</div>
       <div><span class="ch-val">--</span> <span class="ch-unit"></span></div>
       <canvas class="ch-spark" height="44"></canvas>`;
@@ -943,11 +975,12 @@ function renderChannelGrid() {
       const on = !mainChart.isVisible(ch);
       mainChart.setVisible(ch, on);
       d.classList.toggle("off", !on); badge.classList.toggle("off", !on);
-      mainChart.redraw();
+      mainChart.redraw(); renderChartLegend();
     };
     grid.appendChild(d);
   }
   refreshSparks();
+  applyChartPage();
 }
 
 /* 通道小趨勢圖：取該通道緩衝區最後一段畫迷你折線 */
@@ -985,7 +1018,7 @@ function refreshSparks() {
     const buf = sensMode ? S.sensBuf[ch] : S.dataBuf[ch];
     const arr = buf || [];
     const last = arr.length ? arr[arr.length - 1] : NaN;
-    const color = activeRule().enabled ? (channelColor(last) || "#475569") : "#38bdf8";
+    const color = segmentColor(ch, last);
     drawSpark(el.querySelector(".ch-spark"), arr.slice(-120), color);
   }
 }
@@ -1621,7 +1654,7 @@ function bindEvents() {
     $("chartTitle").textContent = isSens ? "即時監控圖 — 靈敏度 (R/R0)" : "即時監控圖 — 電阻 (kΩ)";
     // 重建圖表序列以切換數值
     mainChart.clear();
-    for (const ch of S.channels) mainChart.setSeries(ch, "#94a3b8");
+    for (const ch of S.channels) mainChart.setSeries(ch, channelColorOf(ch));
     const n = S.timeBuf.length;
     for (let i = 0; i < n; i++) {
       const t = S.timeBuf[i];
@@ -1659,10 +1692,13 @@ function bindEvents() {
   $("btnTimerReset").onclick = () => { S.timerRunning = false; S.timerSec = 0; drawTimer(); };
   setInterval(() => { if (S.timerRunning) { S.timerSec++; drawTimer(); } }, 1000);
 
-  $("btnChPrev").onclick = () => { if (S.chPage > 0) { S.chPage--; renderChannelGrid(); } };
+  $("btnChPrev").onclick = () => { S.chView = "page"; if (S.chPage > 0) S.chPage--; renderChannelGrid(); };
   $("btnChNext").onclick = () => {
-    if ((S.chPage + 1) * 16 < S.channels.length) { S.chPage++; renderChannelGrid(); }
+    S.chView = "page";
+    if ((S.chPage + 1) * 16 < S.channels.length) S.chPage++;
+    renderChannelGrid();
   };
+  $("btnChAll").onclick = () => { S.chView = "all"; renderChannelGrid(); };
 
   const ruleIds = [
     ["ruleResEn", "resistance", "enabled"], ["ruleResMin", "resistance", "min"], ["ruleResMax", "resistance", "max"],

@@ -1,4 +1,4 @@
-/* Canvas 圖表渲染：即時跟隨、滾輪縮放 X／Y 軸、拖曳平移、多通道、PASS 光譜著色 */
+/* Canvas 圖表渲染：即時跟隨、滾輪縮放 X／Y 軸、拖曳平移、多通道、每通道固定色＋NO PASS 變灰 */
 "use strict";
 
 class LineChart {
@@ -12,6 +12,7 @@ class LineChart {
     this._nowT = 0;                              // 最近一次 draw 的即時時間（供平移夾制用）
     this.padL = 56; this.padR = 12; this.padT = 12; this.padB = 26;
     this.series = new Map();                     // name -> {color, values: [[t,v],...]}
+    this.pageSet = null;                          // 主圖分頁：null＝全部，否則只畫集合內的通道
     this.yZoom = null;                           // 手動 Y 軸範圍 {min, max}，null＝自動
     this.hidden = new Set();                     // 主圖隱藏的通道（通道卡徽章關掉的）
     this.drag = null;                            // 拖曳平移起點（X＋Y 一起移）
@@ -188,6 +189,7 @@ class LineChart {
     let tMax = this.tEnd !== null ? this.tEnd : (nowT || 0), vMin = Infinity, vMax = -Infinity, hasData = false;
     for (const [name, s] of this.series) {
       if (this.hidden.has(name)) continue;
+      if (this.pageSet && !this.pageSet.has(name)) continue;
       for (const [t, v] of s.values) {
         if (t < tMax - this.windowSec) continue;
         hasData = true;
@@ -203,7 +205,7 @@ class LineChart {
     ctx.fillStyle = "#64748b"; ctx.font = "11px Consolas, monospace";
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
 
-    const anyVisible = [...this.series.keys()].some(n => !this.hidden.has(n));
+    const anyVisible = [...this.series.keys()].some(n => !this.hidden.has(n) && (!this.pageSet || this.pageSet.has(n)));
     if (!hasData && (this.series.size === 0 || anyVisible)) {
       ctx.textAlign = "center";
       ctx.fillText("等待資料…", this.padL + pw / 2, this.padT + ph / 2);
@@ -236,17 +238,18 @@ class LineChart {
     }
     if (yLabel) { ctx.textAlign = "left"; ctx.fillText(yLabel, this.padL, 6); }
 
-    // 曲線（逐段著色，null -> 灰色；手動縮放時超出範圍的線段裁在圖區內）
+    // 曲線（每通道固定色，判定 NO PASS 的線段變灰；手動縮放時超出範圍的線段裁在圖區內）
     ctx.save();
     ctx.beginPath(); ctx.rect(this.padL, this.padT, pw, ph); ctx.clip();
     ctx.lineWidth = 1.6;
     for (const [name, s] of this.series) {
       if (this.hidden.has(name)) continue;
+      if (this.pageSet && !this.pageSet.has(name)) continue;
       const pts = s.values.filter(([t]) => t >= tMin);
       for (let i = 1; i < pts.length; i++) {
         const [t0, v0] = pts[i - 1], [t1, v1] = pts[i];
         let c = s.color;
-        if (colorFn) c = colorFn((v0 + v1) / 2) || "#64748b";
+        if (colorFn) c = colorFn(name, (v0 + v1) / 2) || "#64748b";
         ctx.strokeStyle = c;
         ctx.beginPath(); ctx.moveTo(X(t0), Y(v0)); ctx.lineTo(X(t1), Y(v1)); ctx.stroke();
       }
