@@ -114,3 +114,21 @@ input[type="checkbox"] { accent-color: var(--accent); }
 
 .k-live { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin: 8px 0; }
 .k-live strong { font-size: 18px; margin: 0 4px; font-variant-numeric: tabular-nums; }
+
+/* Sensor 標籤（僅供對照看，不影響量測）：配深色介面，與通道卡一體；直向排：左欄 A–H、右欄 I–P */
+.sensor-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: repeat(8, auto); grid-auto-flow: column; gap: 6px; }
+.sensor-tag {
+  background: #0b1220; border: 1px solid var(--line); border-radius: 6px; min-width: 0;
+  padding: 2px 8px; display: flex; flex-direction: row; align-items: center; gap: 6px;
+}
+.sensor-tag.empty { border-style: dashed; border-color: #475569; background: transparent; }
+.sensor-ch { font-size: 10px; color: var(--muted); line-height: 1; flex-shrink: 0; }
+.sensor-tag.empty .sensor-ch { color: var(--muted); }
+.sensor-input {
+  border: 0; outline: none; background: transparent; min-width: 0; flex: 1;
+  font-family: "Caveat", "Segoe UI", cursive; font-size: 16px; font-weight: 700;
+  color: var(--text); text-align: center; padding: 0; line-height: 1.1;
+}
+.sensor-input::placeholder { color: #64748b; font-family: "Segoe UI", sans-serif; font-size: 11px; font-weight: 400; }
+.sensor-tag.empty .sensor-input { color: var(--muted); }
+.sensor-reset { padding: 3px 10px; font-size: 12px; }
