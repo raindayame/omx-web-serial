@@ -70,6 +70,7 @@ const S = {
     sensitivity: { enabled: false, min: 0, max: 5 },
   },
   lineBuf: "",
+  sensorTags: {},
 };
 
 const MAXP = 3600;
@@ -1730,12 +1731,67 @@ function drawTimer() {
   $("timerDisplay").textContent = `${h}:${m}:${s}`;
 }
 
+/* ---------------- Sensor 標籤 ---------------- */
+// 通道對應的氣體標籤，僅供對照看，不影響量測。A=CO 第一顆、D 無 sensor、J=NH3；
+// 其餘預設照照片由下往上排，可在 textbox 直接改；改動隨設定存 localStorage。
+const SENSOR_CHS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
+const SENSOR_DEFAULTS = { A: "CO", B: "NO2", C: "H2S", D: "", E: "CH4", F: "EtOH", G: "CH2-4", H: "H2", I: "VOCs", J: "NH3" };
+const SUB_DIGITS = { "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉" };
+function sensorSub(s) { return String(s).replace(/\d/g, d => SUB_DIGITS[d] || d); }
+function sensorTags() {
+  const t = {};
+  for (const ch of SENSOR_CHS) {
+    const v = S.sensorTags && S.sensorTags[ch];
+    t[ch] = typeof v === "string" ? v : (SENSOR_DEFAULTS[ch] || "");
+  }
+  return t;
+}
+function renderSensorBox() {
+  const grid = $("sensorGrid");
+  if (!grid) return;
+  if (!S.sensorTags || typeof S.sensorTags !== "object") S.sensorTags = {};
+  const tags = sensorTags();
+  const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  grid.innerHTML = "";
+  for (const ch of SENSOR_CHS) {
+    const d = document.createElement("div");
+    d.className = "sensor-tag" + (tags[ch] ? "" : " empty");
+    d.innerHTML = `<span class="sensor-ch">${ch}</span>` +
+      `<input type="text" class="sensor-input" data-ch="${ch}" value="${esc(tags[ch])}" placeholder="${ch === "D" ? "無 sensor" : ""}" spellcheck="false" autocomplete="off">`;
+    grid.appendChild(d);
+  }
+  grid.querySelectorAll(".sensor-input").forEach(inp => {
+    inp.addEventListener("input", () => {
+      S.sensorTags[inp.dataset.ch] = inp.value;
+      inp.closest(".sensor-tag").classList.toggle("empty", !inp.value.trim());
+      saveSettings();
+    });
+    inp.addEventListener("blur", () => {
+      const v = sensorSub(inp.value.trim());
+      inp.value = v;
+      S.sensorTags[inp.dataset.ch] = v;
+      inp.closest(".sensor-tag").classList.toggle("empty", !v);
+      saveSettings();
+    });
+    inp.addEventListener("keydown", e => { if (e.key === "Enter") inp.blur(); });
+  });
+  const btn = $("btnSensorReset");
+  if (btn && !btn._bound) {
+    btn._bound = true;
+    btn.onclick = () => {
+      S.sensorTags = { ...SENSOR_DEFAULTS };
+      saveSettings();
+      renderSensorBox();
+    };
+  }
+}
+
 /* ---------------- 設定存取 ---------------- */
 function saveSettings() {
   const c = store.load();
   c.baud = $("baudSel").value;
   c["baud_" + S.instrument] = $("baudSel").value;
-  c.interval = S.interval; c.adc = S.adc; c.rules = S.rules;
+  c.interval = S.interval; c.adc = S.adc; c.rules = S.rules; c.sensorTags = S.sensorTags;
   c.segMs = S.segMs; c.instrument = S.instrument; c.kVolt = S.k.vSet; c.kComp = S.k.comp;
   c.kLink = $("connModeSel").value; c.gpibAddr = $("gpibAddr").value;
   c["gpibAddr_" + S.instrument] = $("gpibAddr").value;
@@ -1788,6 +1844,12 @@ function loadSettings() {
     $("ruleSensMin").value = S.rules.sensitivity.min;
     $("ruleSensMax").value = S.rules.sensitivity.max;
   }
+  if (c.sensorTags && typeof c.sensorTags === "object") {
+    for (const ch of SENSOR_CHS) {
+      if (typeof c.sensorTags[ch] === "string") S.sensorTags[ch] = c.sensorTags[ch];
+    }
+  }
+  renderSensorBox();
 }
 
 /* ---------------- 啟動 ---------------- */
