@@ -1732,10 +1732,10 @@ function drawTimer() {
 }
 
 /* ---------------- Sensor 標籤 ---------------- */
-// 通道對應的氣體標籤，僅供對照看，不影響量測。A=CO 第一顆、D 無 sensor、J=NH3；
-// 其餘預設照照片由下往上排，可在 textbox 直接改；改動隨設定存 localStorage。
-const SENSOR_CHS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
-const SENSOR_DEFAULTS = { A: "CO", B: "NO2", C: "H2S", D: "", E: "CH4", F: "EtOH", G: "CH2-4", H: "H2", I: "VOCs", J: "NH3" };
+// 通道對應的氣體標籤，僅供對照看，不影響量測。16 通道 A–P：A=CO 第一顆、D 無 sensor、J=NH3，
+// K–P 無 sensor；其餘預設照使用者 2026-11-06 給的對照表，可在 textbox 直接改；改動隨設定存 localStorage。
+const SENSOR_CHS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P"];
+const SENSOR_DEFAULTS = { A: "CO", B: "NO2", C: "H2S", D: "", E: "CH4", F: "EtOH", G: "CH2-4", H: "H2", I: "VOCs", J: "NH3", K: "", L: "", M: "", N: "", O: "", P: "" };
 const SUB_DIGITS = { "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉" };
 function sensorSub(s) { return String(s).replace(/\d/g, d => SUB_DIGITS[d] || d); }
 function sensorTags() {
@@ -1757,7 +1757,7 @@ function renderSensorBox() {
     const d = document.createElement("div");
     d.className = "sensor-tag" + (tags[ch] ? "" : " empty");
     d.innerHTML = `<span class="sensor-ch">${ch}</span>` +
-      `<input type="text" class="sensor-input" data-ch="${ch}" value="${esc(tags[ch])}" placeholder="${ch === "D" ? "無 sensor" : ""}" spellcheck="false" autocomplete="off">`;
+      `<input type="text" class="sensor-input" data-ch="${ch}" value="${esc(tags[ch])}" placeholder="無 sensor" spellcheck="false" autocomplete="off">`;
     grid.appendChild(d);
   }
   grid.querySelectorAll(".sensor-input").forEach(inp => {
