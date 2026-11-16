@@ -10,7 +10,8 @@ class LineChart {
     this.retentionSec = 14400;                   // 資料保留 4 小時，供 X 縮放／平移回看
     this.tEnd = null;                            // X 右緣：null＝跟隨即時，否則為凍結的絕對時間
     this._nowT = 0;                              // 最近一次 draw 的即時時間（供平移夾制用）
-    this.padL = 56; this.padR = 12; this.padT = 12; this.padB = 26;
+    this.padL = 56; this.padR = 76; this.padT = 12; this.padB = 26; // 右側留白放直排標籤（■ 通道 數值）
+    this.endLabels = true; // 圖例模式：true＝右側直排標籤（新版），false＝上方橫排圖例（舊版）
     this.series = new Map();                     // name -> {color, values: [[t,v],...]}
     this.pageSet = null;                          // 主圖分頁：null＝全部，否則只畫集合內的通道
     this.yZoom = null;                           // 手動 Y 軸範圍 {min, max}，null＝自動
@@ -24,6 +25,13 @@ class LineChart {
     this.bindEvents();
     this.resize();
     new ResizeObserver(() => this.resize()).observe(canvas);
+  }
+
+  // 切換圖例顯示：true＝右側直排標籤（新版），false＝上方橫排圖例（舊版）
+  setEndLabels(on) {
+    this.endLabels = on;
+    this.padR = on ? 76 : 12;
+    this.redraw();
   }
 
   // 游標所在區：y＝左側 Y 軸條、x＝下方 X 軸條、plot＝圖面、null＝其他邊角
@@ -286,6 +294,47 @@ class LineChart {
       }
     }
     ctx.restore();
+    // 圖例切換：endLabels 為 false（舊版）時不畫右側標籤，改由上方橫排圖例顯示
+    if (this.endLabels === false) {
+      this._endLabels = [];
+    } else {
+      // 右側直排標籤：每條線在右緣（tMax）的最新值高度，值高在上、值低在下；
+      // 橫向圖例已移除，改由這裡認線。相鄰標籤至少隔 13px，值太接近時自動錯開。
+      const endItems = [];
+      for (const [name, s] of this.series) {
+        if (!this.isEffectivelyVisible(name)) continue;
+        if (this.pageSet && !this.pageSet.has(name)) continue;
+        let last = null;
+        for (let i = s.values.length - 1; i >= 0; i--) {
+          if (s.values[i][0] <= tMax) { last = s.values[i]; break; }
+        }
+        if (!last || !Number.isFinite(last[1])) continue;
+        endItems.push({ name, v: last[1], color: s.color, y: Y(last[1]) });
+      }
+      endItems.sort((a, b) => b.v - a.v);
+      const LAB_GAP = 13;
+      for (let i = 1; i < endItems.length; i++) {
+        if (endItems[i].y - endItems[i - 1].y < LAB_GAP) endItems[i].y = endItems[i - 1].y + LAB_GAP;
+      }
+      const labTop = this.padT, labBottom = this.padT + ph;
+      if (endItems.length) {
+        if (endItems[endItems.length - 1].y > labBottom) {
+          const over = endItems[endItems.length - 1].y - labBottom;
+          for (const it of endItems) it.y -= over;
+        }
+        if (endItems[0].y < labTop) {
+          const n = endItems.length;
+          endItems.forEach((it, i) => { it.y = labTop + (n > 1 ? (i * (ph / (n - 1))) : ph / 2); });
+        }
+      }
+      ctx.font = "11px Consolas, monospace";
+      ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      for (const it of endItems) {
+        ctx.fillStyle = it.color;
+        ctx.fillText(`■ ${it.name} ${it.v.toFixed(yDec)}`, this.padL + pw + 4, it.y);
+      }
+      this._endLabels = endItems; // 供測試讀取：[{name, v, y}]
+    }
     // 脫離即時跟隨時提示（雙擊回到即時）
     if (this.tEnd !== null) {
       ctx.textAlign = "right"; ctx.textBaseline = "top";

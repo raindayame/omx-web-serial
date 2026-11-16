@@ -49,6 +49,7 @@ const S = {
   timeBuf: [], dataBuf: {}, sensBuf: {}, sensBufInv: {}, tempBuf: [], humdBuf: [],
   r0: {}, hasR0: false,
   mode: "RESISTANCE", sensRatio: "R/R0",
+  legendMode: "end", // 圖例：end＝右側直排標籤（新版），top＝上方橫排圖例（舊版）
   csvRows: [], recording: false, recResRows: [], recSensRows: [], recSensRowsInv: [],
   // M7：下載模式下已觸發過一次下載、但尚未確認寫入成功的分段列，
   // 下次分段會再隨新資料一併下載一次，之後才丟棄。
@@ -1082,11 +1083,18 @@ function judge(value) {
   return value >= r.min && value <= r.max ? "pass" : "fail";
 }
 
+// 16 通道色板：Tableau tab20 挑出的 16 色（深色 10 色在前、淺色 6 色在後，
+// 連續通道不同色相；最小色差 ΔE 約 26，舊黃金角取色最小只有約 10）
+// 32 通道時循環使用（第 17 通道起與前 16 色重複）。
+const CHANNEL_PALETTE = [
+  "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+  "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+  "#aec7e8", "#ffbb78", "#98df8a", "#ff9896", "#f7b6d2", "#dbdb8d",
+];
 function channelColorOf(ch) {
-  // 每通道固定一色：依通道順序用黃金角取色，32 通道不重複色相
   const i = S.channels.indexOf(ch);
   if (i < 0) return "#94a3b8";
-  return `hsl(${Math.round((i * 137.5) % 360)}, 80%, 60%)`;
+  return CHANNEL_PALETTE[i % CHANNEL_PALETTE.length];
 }
 
 // 主圖線段色：通道固定色；判定規則啟用且該段為 NO PASS 時變灰
@@ -1113,6 +1121,17 @@ function renderChartLegend() {
     const dim = !mainChart.isEffectivelyVisible(ch);
     return `<span style="color:${dim ? "#64748b" : base}">${dim ? "□" : "■"} ${ch}</span>`;
   }).join("");
+}
+
+// 圖例切換：end＝右側直排標籤（新版），top＝上方橫排圖例（舊版）
+function applyLegendMode() {
+  const isEnd = S.legendMode !== "top";
+  $("btnLegend").textContent = isEnd ? "標籤：線尾" : "標籤：圖例";
+  $("btnLegend").classList.toggle("on", isEnd);
+  const el = $("chartLegend");
+  if (el) el.style.display = isEnd ? "none" : "";
+  mainChart.setEndLabels(isEnd);
+  if (!isEnd) renderChartLegend();
 }
 
 function updateLiveUI(avg, sens, avgT, avgH, recordSec) {
@@ -1900,6 +1919,13 @@ function bindEvents() {
     log(`靈敏度切換為 ${S.sensRatio}。`);
   };
 
+  $("btnLegend").onclick = () => {
+    S.legendMode = S.legendMode === "top" ? "end" : "top";
+    applyLegendMode();
+    saveSettings();
+    log(`圖例切換為${S.legendMode === "top" ? "上方橫排圖例" : "右側直排標籤"}。`);
+  };
+
   $("btnR0").onclick = () => {
     if (!S.hasData || !S.timeBuf.length) { log("尚無資料，無法設置 Rair。"); return; }
     for (const ch of S.channels) {
@@ -2075,6 +2101,7 @@ function saveSettings() {
   c["baud_" + S.instrument] = $("baudSel").value;
   c.interval = S.interval; c.adc = S.adc; c.rules = S.rules; c.sensorTags = S.sensorTags;
   c.segMs = S.segMs; c.instrument = S.instrument; c.kVolt = S.k.vSet; c.kComp = S.k.comp;
+  c.legendMode = S.legendMode;
   c.kLink = $("connModeSel").value; c.gpibAddr = $("gpibAddr").value;
   c["gpibAddr_" + S.instrument] = $("gpibAddr").value;
   c.aFunc = S.a.func; c.aRange = S.a.range; c.aNplc = S.a.nplc;
@@ -2131,6 +2158,7 @@ function loadSettings() {
       if (typeof c.sensorTags[ch] === "string") S.sensorTags[ch] = c.sensorTags[ch];
     }
   }
+  if (c.legendMode === "top" || c.legendMode === "end") S.legendMode = c.legendMode;
   renderSensorBox();
 }
 
@@ -2138,6 +2166,7 @@ function loadSettings() {
 initCharts();
 loadSettings();
 bindEvents();
+applyLegendMode();
 drawTimer();
 if (!("serial" in navigator)) {
   log("提醒：此瀏覽器不支援 Web Serial API，請使用 Chrome / Edge 開啟本頁。");
