@@ -15,6 +15,8 @@ class LineChart {
     this.pageSet = null;                          // 主圖分頁：null＝全部，否則只畫集合內的通道
     this.yZoom = null;                           // 手動 Y 軸範圍 {min, max}，null＝自動
     this.hidden = new Set();                     // 主圖隱藏的通道（通道卡徽章關掉的）
+    this.autoHidden = new Set();                 // R=0 時自動隱藏的通道（讀到非 0 即恢復）
+    this.forcedOn = new Set();                   // 使用者手動開顯示：R=0 也能顯示
     this.drag = null;                            // 拖曳平移起點（X＋Y 一起移）
     this._auto = null;                           // 上次自動算出的顯示範圍（含 padding）
     this._last = null;                           // 上次 draw 參數，供縮放重繪用
@@ -145,9 +147,24 @@ class LineChart {
   }
 
   // 線標磚開關：關掉只隱藏主圖的線，不影響記錄與通道卡
-  setVisible(name, on) { if (on) this.hidden.delete(name); else this.hidden.add(name); }
+  setVisible(name, on) {
+    if (on) this.hidden.delete(name);
+    else { this.hidden.add(name); this.forcedOn.delete(name); }
+  }
   isVisible(name) { return !this.hidden.has(name); }
-  resetVisible() { this.hidden.clear(); }
+  // R=0 自動隱藏：讀到 0 就隱藏主圖的線，讀到非 0 即恢復；與手動開關互不干擾
+  setAutoHidden(name, hide) {
+    if (hide) this.autoHidden.add(name);
+    else { this.autoHidden.delete(name); this.forcedOn.delete(name); } // R 恢復非 0，強制顯示也跟著解除
+  }
+  isAutoHidden(name) { return this.autoHidden.has(name); }
+  // 使用者手動開顯示：R=0 也能顯示（覆蓋自動隱藏）；R 恢復非 0 或手動關掉時解除
+  forceVisible(name, on) { if (on) this.forcedOn.add(name); else this.forcedOn.delete(name); }
+  // 實際有沒有畫出來：手動沒關，且（沒被自動隱藏，或被使用者強制開顯示）
+  isEffectivelyVisible(name) {
+    return !this.hidden.has(name) && (!this.autoHidden.has(name) || this.forcedOn.has(name));
+  }
+  resetVisible() { this.hidden.clear(); this.autoHidden.clear(); this.forcedOn.clear(); }
 
   push(name, t, v) {
     const s = this.series.get(name);
@@ -188,7 +205,7 @@ class LineChart {
     // 收集可見範圍與 Y 極值（跟隨即時時右緣＝現在，拖曳／縮放脫離後右緣凍結；隱藏的通道不參與）
     let tMax = this.tEnd !== null ? this.tEnd : (nowT || 0), vMin = Infinity, vMax = -Infinity, hasData = false;
     for (const [name, s] of this.series) {
-      if (this.hidden.has(name)) continue;
+      if (!this.isEffectivelyVisible(name)) continue;
       if (this.pageSet && !this.pageSet.has(name)) continue;
       for (const [t, v] of s.values) {
         if (t < tMax - this.windowSec) continue;
@@ -205,7 +222,7 @@ class LineChart {
     ctx.fillStyle = "#64748b"; ctx.font = "11px Consolas, monospace";
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
 
-    const anyVisible = [...this.series.keys()].some(n => !this.hidden.has(n) && (!this.pageSet || this.pageSet.has(n)));
+    const anyVisible = [...this.series.keys()].some(n => this.isEffectivelyVisible(n) && (!this.pageSet || this.pageSet.has(n)));
     if (!hasData && (this.series.size === 0 || anyVisible)) {
       ctx.textAlign = "center";
       ctx.fillText("等待資料…", this.padL + pw / 2, this.padT + ph / 2);
@@ -218,15 +235,29 @@ class LineChart {
     this._auto = { min: vMin, max: vMax };
     // 手動 Y 軸縮放時用手動範圍取代自動範圍
     if (this.yZoom && this.yZoom.max > this.yZoom.min) { vMin = this.yZoom.min; vMax = this.yZoom.max; }
+    // Y 刻度取 1-2-5 進位：整數範圍用整數，0.x 範圍用 0.1、0.2…，最細只到 0.1（標籤至少是 1.10，不出現 1.08 這種尾數）；自動範圍與手動放大縮小都保持乾淨刻度
+    const yRaw = (vMax - vMin) / 4;
+    const yMag = Math.pow(10, Math.floor(Math.log10(Math.max(yRaw, 1e-9))));
+    const yNorm = yRaw / yMag;
+    const yStepRaw = yNorm < 1.5 ? yMag : yNorm < 3 ? 2 * yMag : yNorm < 7 ? 5 * yMag : 10 * yMag;
+    const yStep = Math.max(0.1, yStepRaw); // 最細 0.1
+    const yDec = Math.max(0, Math.ceil(-Math.log10(yStep)));
+    let yK0 = Math.ceil(vMin / yStep - 1e-9);
+    let yK1 = Math.floor(vMax / yStep + 1e-9);
+    if (yK0 > yK1) { // 區間內沒有刻度（浮點誤差）：顯示範圍擴到最近的刻度
+      vMin = Math.floor(vMin / yStep + 1e-9) * yStep; vMax = Math.ceil(vMax / yStep - 1e-9) * yStep;
+      yK0 = Math.round(vMin / yStep); yK1 = Math.round(vMax / yStep);
+    }
 
     const X = t => this.padL + ((t - tMin) / this.windowSec) * pw;
     const Y = v => this.padT + ph - ((v - vMin) / (vMax - vMin)) * ph;
 
-    // Y 格線 + 標籤
-    for (let i = 0; i <= 4; i++) {
-      const v = vMin + ((vMax - vMin) * i) / 4, y = Y(v);
+    // Y 格線 + 標籤（1-2-5 進位刻度）
+    for (let k = yK0; k <= yK1; k++) {
+      const v = k * yStep;
+      const y = Y(v);
       ctx.beginPath(); ctx.moveTo(this.padL, y); ctx.lineTo(this.padL + pw, y); ctx.stroke();
-      ctx.fillText(v >= 100 ? v.toFixed(0) : v.toFixed(2), this.padL - 6, y);
+      ctx.fillText((v === 0 ? 0 : v).toFixed(yDec), this.padL - 6, y);
     }
     // X 時間標籤（間隔隨視窗長度自適應，約 6–8 個標籤）
     ctx.textAlign = "center"; ctx.textBaseline = "top";
@@ -243,7 +274,7 @@ class LineChart {
     ctx.beginPath(); ctx.rect(this.padL, this.padT, pw, ph); ctx.clip();
     ctx.lineWidth = 1.6;
     for (const [name, s] of this.series) {
-      if (this.hidden.has(name)) continue;
+      if (!this.isEffectivelyVisible(name)) continue;
       if (this.pageSet && !this.pageSet.has(name)) continue;
       const pts = s.values.filter(([t]) => t >= tMin);
       for (let i = 1; i < pts.length; i++) {

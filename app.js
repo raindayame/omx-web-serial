@@ -46,11 +46,18 @@ const S = {
   channels: [], hasData: false,
   interval: 1, startTime: 0, lastRecordSec: 0,
   accum: {}, tempAcc: [], humdAcc: [],
-  timeBuf: [], dataBuf: {}, sensBuf: {}, tempBuf: [], humdBuf: [],
+  timeBuf: [], dataBuf: {}, sensBuf: {}, sensBufInv: {}, tempBuf: [], humdBuf: [],
   r0: {}, hasR0: false,
-  mode: "RESISTANCE",
-  csvRows: [], recording: false, recResRows: [], recSensRows: [],
-  timerSec: 0, timerRunning: false,
+  mode: "RESISTANCE", sensRatio: "R/R0",
+  csvRows: [], recording: false, recResRows: [], recSensRows: [], recSensRowsInv: [],
+  // M7：下載模式下已觸發過一次下載、但尚未確認寫入成功的分段列，
+  // 下次分段會再隨新資料一併下載一次，之後才丟棄。
+  prevDownloadRows: [], downloadWarned: false,
+  timerSec: 0, timerRunning: false, timerStartMs: 0, timerAccumMs: 0,
+  // M2：螢幕 Wake Lock（背景分頁防休眠）；M4：無資料看門狗計時器
+  wakeLock: null, noDataTimer: null,
+  // M5：自動重連時 VID/PID 無法確認的埠，需等 ESP32 資料驗證通過才算成功
+  awaitingReconnectVerify: false, reconnectVerifyTimer: null,
   chPage: 0, chView: "page",
   dirHandle: null, segMs: 0, segStart: 0, segBusy: false, segFileHandle: null,
   events: [],
@@ -70,11 +77,50 @@ const S = {
     sensitivity: { enabled: false, min: 0, max: 5 },
   },
   lineBuf: "",
+  seq: {}, droppedLines: 0, lastDropWarn: 0,
   sensorTags: {},
 };
 
 const MAXP = 3600;
 function pushBuf(arr, v) { arr.push(v); if (arr.length > MAXP) arr.shift(); }
+
+// M4：連接後無有效資料行的看門狗逾時（毫秒）；模擬面板可引用此常數。
+const NO_DATA_TIMEOUT_MS = 10000;
+
+// M5：常見 ESP32 USB 轉串列晶片的 VID/PID（port.getInfo() 回傳值）
+const ESP32_USB_IDS = [
+  { usbVendorId: 0x10C4, usbProductId: 0xEA60 }, // CP210x
+  { usbVendorId: 0x1A86, usbProductId: 0x7523 }, // CH340
+  { usbVendorId: 0x0403, usbProductId: 0x6001 }, // FTDI
+];
+function isEsp32SerialPort(port) {
+  let info = null;
+  try { info = port.getInfo(); } catch { return false; }
+  if (!info) return false;
+  return ESP32_USB_IDS.some((id) =>
+    info.usbVendorId === id.usbVendorId && info.usbProductId === id.usbProductId);
+}
+
+// M2：連線期間請求螢幕 Wake Lock，避免背景分頁休眠／系統睡眠中斷量測。
+// 不支援的瀏覽器直接略過；請求失敗（如剛切走分頁）也屬正常，不報錯。
+async function requestWakeLock() {
+  if (!("wakeLock" in navigator)) return;
+  try { S.wakeLock = await navigator.wakeLock.request("screen"); }
+  catch { /* 拿不到鎖屬正常（如分頁剛被隱藏），不斷線 */ }
+}
+function releaseWakeLock() {
+  if (!S.wakeLock) return;
+  const wl = S.wakeLock; S.wakeLock = null;
+  try {
+    const p = wl.release();
+    if (p && typeof p.catch === "function") p.catch(() => {});
+  } catch {}
+}
+
+// M4：清除無資料看門狗（連線結束、重設場次、收到第一筆有效資料時呼叫）
+function clearNoDataTimer() {
+  if (S.noDataTimer) { clearTimeout(S.noDataTimer); S.noDataTimer = null; }
+}
 
 /* ---------------- 圖表 ---------------- */
 let mainChart;
@@ -84,15 +130,19 @@ function initCharts() {
 
 /* ---------------- 序列埠 ---------------- */
 // 取得已開啟的 port：重用上次的 → 已配對的 → 選擇器
+// M5：已授權的埠先依 USB VID/PID 篩出 ESP32 常見轉接器（CP210x / CH340 / FTDI）
+// 依序嘗試；沒有任何埠符合時退回舊行為（依序試已授權的埠）。
 async function acquirePort(baudRate) {
   if (S.port) {
     try { await S.port.open({ baudRate }); return S.port; }
     catch { S.port = null; } // 裝置可能已拔除
   }
   const ports = await navigator.serial.getPorts();
-  if (ports.length) {
-    try { await ports[0].open({ baudRate }); S.port = ports[0]; return S.port; }
-    catch { /* 掉到選擇器 */ }
+  const espPorts = ports.filter(isEsp32SerialPort);
+  const candidates = espPorts.length ? espPorts : ports;
+  for (const port of candidates) {
+    try { await port.open({ baudRate }); S.port = port; return port; }
+    catch { /* 這個埠開不了就試下一個 */ }
   }
   const port = await navigator.serial.requestPort(); // 使用者取消會丟 NotFoundError
   await port.open({ baudRate });
@@ -103,11 +153,20 @@ async function acquirePort(baudRate) {
 async function esp32Setup(port, baudRate) {
   S.port = port;
   S.writer = port.writable.getWriter();
-  resetSession();
+  await resetSession();
   S.connected = true;
   S.keepReading = true;
   updateConnUI();
   log(`已連接 COM（${baudRate} baud），等待硬體資料以進行通道自適應偵測…`);
+  // M4：無資料看門狗——10 秒內沒收到有效資料行就提示檢查鮑率／COM 埠／供電，不自動斷線
+  clearNoDataTimer();
+  S.noDataTimer = setTimeout(() => {
+    S.noDataTimer = null;
+    if (S.connected && !S.hasData) {
+      log("仍未收到硬體資料：請檢查鮑率是否為 115200、是否選到正確的 COM 埠，以及 ESP32 是否已上電並持續傳送資料。");
+    }
+  }, NO_DATA_TIMEOUT_MS);
+  requestWakeLock(); // M2：連線期間請求螢幕 Wake Lock
   readLoop();
 }
 
@@ -146,6 +205,41 @@ async function connectSerial() {
 function stopAutoReconnect() {
   S.reconnecting = false;
   if (S.reconnectTimer) { clearTimeout(S.reconnectTimer); S.reconnectTimer = null; }
+  if (S.reconnectVerifyTimer) { clearTimeout(S.reconnectVerifyTimer); S.reconnectVerifyTimer = null; }
+  S.awaitingReconnectVerify = false;
+}
+// M5：未確認埠收到有效的 ESP32 行（資料行或 SELECT MOD）時才宣告重連成功，
+// 並補送本場次校正值；在此之前不算連線成功、不送 y… ADC 指令。
+async function confirmReconnectVerified() {
+  if (!S.awaitingReconnectVerify) return;
+  S.awaitingReconnectVerify = false;
+  if (S.reconnectVerifyTimer) { clearTimeout(S.reconnectVerifyTimer); S.reconnectVerifyTimer = null; }
+  S.connected = true;
+  stopAutoReconnect();
+  updateConnUI();
+  log("自動重連成功，已驗證 ESP32 資料，恢復數據接收。");
+  requestWakeLock();
+  if (S.calDone.length) {
+    try { await sendAdcValues(S.adc); log("已將本場次校正值送回裝置。"); }
+    catch (e) { log(`校正值送回失敗：${e.message}，請手動重跑自動校正。`); }
+  }
+}
+// M5：驗證逾時——該埠在時限內沒回傳 ESP32 資料，關掉它、換下一個埠重試。
+async function failReconnectVerify() {
+  if (!S.awaitingReconnectVerify) return;
+  S.awaitingReconnectVerify = false;
+  S.reconnectVerifyTimer = null;
+  log("自動重連：該 COM 埠未回傳 ESP32 資料（可能不是 ESP32），關閉並換下一個埠重試…");
+  S.readGen++; // 作廢驗證中的 readLoop
+  S.keepReading = false;
+  try { if (S.reader) await S.reader.cancel(); } catch {}
+  try { if (S.writer) S.writer.releaseLock(); } catch {}
+  try { if (S.port) await S.port.close(); } catch {}
+  S.failedPort = S.port;
+  S.reader = null; S.writer = null; S.port = null;
+  S.connected = false;
+  updateConnUI();
+  if (S.reconnecting) S.reconnectTimer = setTimeout(tryAutoReconnect, 3000);
 }
 async function tryAutoReconnect() {
   if (!S.reconnecting || S.reconnectBusy || S.connected) return;
@@ -153,26 +247,43 @@ async function tryAutoReconnect() {
   try {
     const baudRate = parseInt($("baudSel").value, 10);
     const ports = await navigator.serial.getPorts();
-    // 重插後的新埠通常排在後面，先試；上次讀取失敗的埠放最後（舊埠物件可能還在清單裡，
-    // 先試它會立刻讀取失敗又跳回重連中，造成已連線／重連中來回翻）
+    // M5：重插後的新埠通常排在後面，先試；ESP32 常見 VID/PID 的埠優先；
+    // 上次讀取失敗的埠放最後（舊埠物件可能還在清單裡，先試它會立刻讀取
+    // 失敗又跳回重連中，造成已連線／重連中來回翻）
     const ordered = [...ports].reverse();
-    ordered.sort((a, b) => (a === S.failedPort ? 1 : 0) - (b === S.failedPort ? 1 : 0));
+    ordered.sort((a, b) =>
+      ((a === S.failedPort ? 10 : 0) + (isEsp32SerialPort(a) ? 0 : 1)) -
+      ((b === S.failedPort ? 10 : 0) + (isEsp32SerialPort(b) ? 0 : 1)));
     for (const port of ordered) {
       try {
         await port.open({ baudRate });
         S.port = port;
         S.writer = port.writable.getWriter();
-        S.connected = true; S.keepReading = true;
+        S.keepReading = true;
         S.failedPort = null;
-        stopAutoReconnect();
-        updateConnUI();
-        log("自動重連成功，恢復數據接收。");
-        if (S.calDone.length) {
-          try { await sendAdcValues(S.adc); log("已將本場次校正值送回裝置。"); }
-          catch (e) { log(`校正值送回失敗：${e.message}，請手動重跑自動校正。`); }
+        if (isEsp32SerialPort(port)) {
+          // VID/PID 已確認是 ESP32 轉接器：沿用舊行為，立即宣告成功
+          S.connected = true;
+          stopAutoReconnect();
+          updateConnUI();
+          log("自動重連成功，恢復數據接收。");
+          requestWakeLock();
+          if (S.calDone.length) {
+            try { await sendAdcValues(S.adc); log("已將本場次校正值送回裝置。"); }
+            catch (e) { log(`校正值送回失敗：${e.message}，請手動重跑自動校正。`); }
+          }
+          readLoop();
+          return;
         }
+        // M5：VID/PID 無法確認（非 ESP32 轉接器、或抓不到資訊）：先讀資料，
+        // 收到有效的 ESP32 行或 SELECT MOD 才宣告成功；逾時則關埠換下一個。
+        // 這段期間不算已連線、不送 y… ADC 指令。
+        S.awaitingReconnectVerify = true;
+        updateConnUI(); // 仍顯示「重連中…」，直到驗證通過
+        log("自動重連：已開啟一個未確認的 COM 埠，等待 ESP32 資料驗證…");
         readLoop();
-        return;
+        S.reconnectVerifyTimer = setTimeout(() => { failReconnectVerify(); }, NO_DATA_TIMEOUT_MS);
+        return; // 等驗證結果，不再試其他埠
       } catch { /* 這個埠開不了就試下一個 */ }
     }
   } catch { /* 下一輪再試 */ }
@@ -192,6 +303,8 @@ async function handleUnexpectedDisconnect() {
   S.failedPort = S.port; // 下一輪重連先試別的埠，這個放最後
   S.reader = null; S.writer = null; S.port = null;
   S.connected = false;
+  clearNoDataTimer(); // M4：連線已斷，看門狗不用再等
+  releaseWakeLock(); // M2：斷線即放掉 Wake Lock，重連成功時再重新請求
   updateConnUI();
   log("連線異常，自動重連中（每 3 秒重試；按「斷開並換裝置」可停止）…");
   tryAutoReconnect();
@@ -200,6 +313,13 @@ async function handleUnexpectedDisconnect() {
 async function disconnectSerial() {
   stopAutoReconnect();
   S.keepReading = false;
+  clearNoDataTimer(); // M4：已手動斷開，看門狗不用再等
+  releaseWakeLock(); // M2：斷開即放掉 Wake Lock
+  // M6：斷開前先把未寫出的分段資料寫出（資料夾模式追加寫入／下載模式觸發下載），
+  // 避免上一場的段尾資料因斷開而遺失。
+  if ((S.csvRows.length || S.prevDownloadRows.length) && S.hasData) {
+    try { await flushSegment(); } catch {}
+  }
   if (S.instrument === "agilent") S.a.measuring = false;
   // Keithley：先關 Output 並驗證（安全）
   if (S.instrument === "keithley" && S.connected && S.k.outputOn) {
@@ -384,7 +504,7 @@ function resetKeithleySession() {
   S.csvRows = [];
   S.startTime = performance.now(); S.lastRecordSec = 0;
   S.segStart = performance.now(); S.segFileHandle = null;
-  S.timeBuf = []; S.dataBuf = { K2400: [] }; S.sensBuf = { K2400: [] };
+  S.timeBuf = []; S.dataBuf = { K2400: [] }; S.sensBuf = { K2400: [] }; S.sensBufInv = { K2400: [] };
   S.tempBuf = []; S.humdBuf = [];
   S.r0 = {}; S.hasR0 = false;
   mainChart.clear();
@@ -608,7 +728,7 @@ function resetAgilentSession() {
   S.csvRows = [];
   S.startTime = performance.now(); S.lastRecordSec = 0;
   S.segStart = performance.now(); S.segFileHandle = null;
-  S.timeBuf = []; S.dataBuf = { A34401A: [] }; S.sensBuf = { A34401A: [] };
+  S.timeBuf = []; S.dataBuf = { A34401A: [] }; S.sensBuf = { A34401A: [] }; S.sensBufInv = { A34401A: [] };
   S.tempBuf = []; S.humdBuf = [];
   mainChart.clear();
   mainChart.setSeries("A34401A", "#a78bfa");
@@ -809,23 +929,59 @@ function handleText(chunk) {
   }
 }
 
+// 丟棄行計數：每行不完整資料都計數，日誌至多每 10 秒記一次，避免洗版
+function noteDroppedLine() {
+  S.droppedLines++;
+  const now = Date.now();
+  if (now - S.lastDropWarn >= 10000) {
+    S.lastDropWarn = now;
+    log(`資料行不完整，已累計 ${S.droppedLines} 行。`);
+  }
+}
+
 /* ---------------- 協定解析 ---------------- */
 function handleLine(line) {
   if (line.includes("SELECT MOD")) {
-    writeLine("1\n").catch((e) => log(`回寫 SELECT MOD 失敗：${e.message}`));
+    // 裝置重啟會重印 SELECT MOD：場次中途（已收過有效資料）且本場次已有
+    // 校正值時，韌體校正值已回到預設，須把 S.adc 送回；初次連接時
+    // S.hasData 仍為 false，不送回（依 2026-11-01 決定，每次開機重新校正）。
+    const resendCal = S.hasData && S.calDone.length > 0;
+    writeLine("1\n").then(async () => {
+      if (!resendCal) return;
+      try { await sendAdcValues(S.adc); log("裝置疑似重啟，已將本場次校正值送回裝置。"); }
+      catch (e) { log(`校正值送回失敗：${e.message}，請手動重跑自動校正。`); }
+    }).catch((e) => log(`回寫 SELECT MOD 失敗：${e.message}`));
+    confirmReconnectVerified(); // M5：SELECT MOD 也算 ESP32 驗證通過
     return;
   }
-  if (!line.includes("TEMP") || !line.includes("HUMD")) return;
+  if (!line.includes("TEMP") || !line.includes("HUMD")) { noteDroppedLine(); return; }
 
   const clean = line.replace(/TEMP/g, " ").replace(/HUMD/g, " ");
   const matches = [...clean.matchAll(/([-0-9.]+)([a-zA-Z]+)/g)];
-  if (!matches.length) return;
+  // S4：數值須是嚴格格式才接受（--、-.、1.2.3 這類怪字串不進平均，避免 NaN 污染）
+  const isNumStr = (s) => /^-?(?:\d+\.?\d*|\.\d+)$/.test(s);
+  if (!matches.length) { noteDroppedLine(); return; }
 
   if (!S.hasData) {
-    S.channels = matches.map((m) => m[2]);
+    const detected = matches.map((m) => m[2]);
+    // 首行可能是接上已在串流的裝置時截到的半行：只接受完整連續的
+    // 16 通道（A–P）或 32 通道（A–P＋AA–PP），否則不鎖定、繼續等下一行。
+    const letters16 = Array.from({ length: 16 }, (_, i) => String.fromCharCode(65 + i));
+    const expected32 = [...letters16, ...letters16.map((c) => c + c)];
+    // 首行數值也要全部有效，才是真正完整有效的資料行，不只通道名齊全
+    const allNumsValid = matches.every((m) => isNumStr(m[1]) && Number.isFinite(parseFloat(m[1])));
+    const ok16 = detected.length === 16 && detected.every((c, i) => c === letters16[i]) && allNumsValid;
+    const ok32 = detected.length === 32 && detected.every((c, i) => c === expected32[i]) && allNumsValid;
+    if (!ok16 && !ok32) {
+      noteDroppedLine();
+      log(`通道偵測異常：首行僅 ${detected.length} 通道（${detected.join(",")}），非完整 16／32 通道，繼續等待有效首行。`);
+      return;
+    }
+    S.channels = detected;
     S.hasData = true;
+    clearNoDataTimer(); // M4：收到第一筆有效資料行，看門狗解除
     for (const ch of S.channels) {
-      S.accum[ch] = []; S.dataBuf[ch] = []; S.sensBuf[ch] = [];
+      S.accum[ch] = []; S.dataBuf[ch] = []; S.sensBuf[ch] = []; S.sensBufInv[ch] = []; S.seq[ch] = 0;
       mainChart.setSeries(ch, channelColorOf(ch));
     }
     log(`自動偵測完成：${S.channels.length} 通道（${S.channels.join(",")}）。`);
@@ -833,14 +989,20 @@ function handleLine(line) {
     refreshAutoCalChannels();
   }
   const parsed = {};
-  for (const m of matches) parsed[m[2]] = parseFloat(m[1]);
-  if (!S.channels.every((ch) => ch in parsed)) return;
+  for (const m of matches) {
+    const v = parseFloat(m[1]);
+    if (isNumStr(m[1]) && Number.isFinite(v)) parsed[m[2]] = v;
+  }
+  const missing = S.channels.filter((ch) => !(ch in parsed));
+  if (missing.length === S.channels.length) { noteDroppedLine(); return; }
+  if (missing.length) noteDroppedLine(); // 部分缺值：計數後仍記錄，缺值欄留空
+  confirmReconnectVerified(); // M5：完整有效的 ESP32 資料行，驗證通過
 
   const tm = line.match(/([-0-9.]+)TEMP/);
   const hm = line.match(/([-0-9.]+)HUMD/);
-  for (const ch of S.channels) S.accum[ch].push(parsed[ch]);
-  if (tm) S.tempAcc.push(parseFloat(tm[1]));
-  if (hm) S.humdAcc.push(parseFloat(hm[1]));
+  for (const ch of S.channels) if (ch in parsed) S.accum[ch].push(parsed[ch]);
+  if (tm && isNumStr(tm[1])) { const v = parseFloat(tm[1]); if (Number.isFinite(v)) S.tempAcc.push(v); }
+  if (hm && isNumStr(hm[1])) { const v = parseFloat(hm[1]); if (Number.isFinite(v)) S.humdAcc.push(v); }
 
   const elapsed = (performance.now() - S.startTime) / 1000;
   if (elapsed - S.lastRecordSec < S.interval) return;
@@ -850,8 +1012,10 @@ function handleLine(line) {
 
 function recordSample(recordSec) {
   const avg = {};
+  const hasSample = {};
   for (const ch of S.channels) {
     const a = S.accum[ch];
+    hasSample[ch] = a.length > 0;
     avg[ch] = a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
     S.accum[ch] = [];
   }
@@ -863,23 +1027,48 @@ function recordSample(recordSec) {
 
   pushBuf(S.timeBuf, recordSec);
   pushBuf(S.tempBuf, avgT); pushBuf(S.humdBuf, avgH);
-  const sens = {};
+  const sens = {}, sensInv = {};
   for (const ch of S.channels) {
     pushBuf(S.dataBuf[ch], avg[ch]);
+    // S6：只有真的收到該通道資料才計數，缺值區間不增加——自動校正等新樣本時才不會拿到補 0 的假資料
+    if (hasSample[ch]) S.seq[ch] = (S.seq[ch] || 0) + 1; // 單調計數，不受 MAXP 截斷影響（H1）
     const r0 = S.r0[ch] || 1;
     const sv = r0 !== 0 ? avg[ch] / r0 : 1;
+    const svInv = avg[ch] !== 0 ? r0 / avg[ch] : 1;
     pushBuf(S.sensBuf[ch], sv);
-    sens[ch] = sv;
-    mainChart.push(ch, recordSec, S.mode === "SENSITIVITY" ? sv : avg[ch]);
+    pushBuf(S.sensBufInv[ch], svInv);
+    sens[ch] = sv; sensInv[ch] = svInv;
+    mainChart.push(ch, recordSec, S.mode === "SENSITIVITY" ? (S.sensRatio === "R/R0" ? sv : svInv) : avg[ch]);
+    // 讀到 R=0 該通道就從主圖隱藏，讀到非 0 即恢復；沒收到樣本不更動狀態
+    if (hasSample[ch]) mainChart.setAutoHidden(ch, avg[ch] === 0);
   }
 
-  const row = [recordSec, ...S.channels.map((ch) => avg[ch].toFixed(3)), avgT.toFixed(2), avgH.toFixed(2)];
+  const timerSec = currentTimerSec();
+  const row = [recordSec, timerSec, ...S.channels.map((ch) => (hasSample[ch] ? avg[ch].toFixed(3) : "")), avgT.toFixed(2), avgH.toFixed(2)];
   S.csvRows.push(row);
   if (S.recording) {
     S.recResRows.push(row);
-    S.recSensRows.push([recordSec, ...S.channels.map((ch) => sens[ch].toFixed(4)), avgT.toFixed(2), avgH.toFixed(2)]);
+    S.recSensRows.push([recordSec, timerSec, ...S.channels.map((ch) => (hasSample[ch] ? sens[ch].toFixed(4) : "")), avgT.toFixed(2), avgH.toFixed(2)]);
+    S.recSensRowsInv.push([recordSec, timerSec, ...S.channels.map((ch) => (hasSample[ch] ? sensInv[ch].toFixed(4) : "")), avgT.toFixed(2), avgH.toFixed(2)]);
   }
-  updateLiveUI(avg, sens, avgT, avgH, recordSec);
+  updateLiveUI(avg, S.sensRatio === "R/R0" ? sens : sensInv, avgT, avgH, recordSec);
+}
+
+// 依目前模式與靈敏度比值（R/R0 或 R0/R）重建主圖序列
+function rebuildMainChart() {
+  mainChart.clear();
+  for (const ch of S.channels) mainChart.setSeries(ch, channelColorOf(ch));
+  const n = S.timeBuf.length;
+  for (let i = 0; i < n; i++) {
+    const t = S.timeBuf[i];
+    for (const ch of S.channels) {
+      const buf = S.mode === "SENSITIVITY"
+        ? (S.sensRatio === "R/R0" ? S.sensBuf[ch] : S.sensBufInv[ch])
+        : S.dataBuf[ch];
+      if (buf && buf[i] !== undefined) mainChart.push(ch, t, buf[i]);
+    }
+  }
+  mainChart.redraw(); // M2：重建完立即重畫，不用等下一筆資料才恢復顯示
 }
 
 /* ---------------- 即時 UI ---------------- */
@@ -921,7 +1110,7 @@ function renderChartLegend() {
     : [...mainChart.series.keys()];
   el.innerHTML = list.map((ch) => {
     const base = S.channels.includes(ch) ? channelColorOf(ch) : (mainChart.series.get(ch)?.color || "#94a3b8");
-    const dim = !mainChart.isVisible(ch);
+    const dim = !mainChart.isEffectivelyVisible(ch);
     return `<span style="color:${dim ? "#64748b" : base}">${dim ? "□" : "■"} ${ch}</span>`;
   }).join("");
 }
@@ -932,7 +1121,7 @@ function updateLiveUI(avg, sens, avgT, avgH, recordSec) {
 
   // 通道卡
   const vals = S.mode === "SENSITIVITY" ? sens : avg;
-  const unit = S.mode === "SENSITIVITY" ? "R/R0" : "kΩ";
+  const unit = S.mode === "SENSITIVITY" ? S.sensRatio : "kΩ";
   for (const ch of S.channels) {
     const el = document.querySelector(`[data-ch="${ch}"]`);
     if (!el) continue;
@@ -942,13 +1131,18 @@ function updateLiveUI(avg, sens, avgT, avgH, recordSec) {
     const j = judge(v);
     el.classList.toggle("pass", j === "pass");
     el.classList.toggle("fail", j === "fail");
+    // R=0 自動隱藏時卡片也跟著變暗（與手動關掉同一種 off 狀態）；使用者手動開顯示後就恢復亮
+    const off = !mainChart.isEffectivelyVisible(ch);
+    el.classList.toggle("off", off);
+    el.querySelector(".ch-badge").classList.toggle("off", off);
     el.querySelector(".ch-badge").textContent = j === "pass" ? "PASS" : j === "fail" ? "NO PASS" : ch;
   }
   refreshSparks();
+  renderChartLegend(); // 圖例跟著自動隱藏狀態即時更新
 
   // 主圖：每通道固定色，NO PASS 線段變灰
   const colorFn = (name, v) => segmentColor(name, v);
-  mainChart.draw(recordSec, S.mode === "SENSITIVITY" ? "靈敏度 R/R0" : "電阻 kΩ", colorFn);
+  mainChart.draw(recordSec, S.mode === "SENSITIVITY" ? `靈敏度 ${S.sensRatio}` : "電阻 kΩ", colorFn);
 
   const mm = String(Math.floor(recordSec / 60)).padStart(2, "0");
   const ss = String(recordSec % 60).padStart(2, "0");
@@ -978,12 +1172,19 @@ function renderChannelGrid() {
     // 整張通道卡就是線標開關：點卡片任一處開關該通道在主圖的線，不影響記錄與小趨勢圖；
     // 翻頁重建時狀態以主圖為準，不會把關掉的線偷偷開回來
     const badge = d.querySelector(".ch-badge");
-    const off = !mainChart.isVisible(ch);
+    const off = !mainChart.isEffectivelyVisible(ch);
     d.classList.toggle("off", off); badge.classList.toggle("off", off);
     d.onclick = () => {
-      const on = !mainChart.isVisible(ch);
-      mainChart.setVisible(ch, on);
-      d.classList.toggle("off", !on); badge.classList.toggle("off", !on);
+      // 以實際有沒有畫出來為準切換：正在顯示就關掉；沒顯示就開顯示——
+      // 若是 R=0 被自動隱藏，開顯示會強制顯示（R=0 也畫得出來），直到 R 恢復非 0 才解除強制
+      if (mainChart.isEffectivelyVisible(ch)) {
+        mainChart.setVisible(ch, false);
+      } else {
+        mainChart.setVisible(ch, true);
+        if (mainChart.isAutoHidden(ch)) mainChart.forceVisible(ch, true);
+      }
+      const offNow = !mainChart.isEffectivelyVisible(ch);
+      d.classList.toggle("off", offNow); badge.classList.toggle("off", offNow);
       mainChart.redraw(); renderChartLegend();
     };
     grid.appendChild(d);
@@ -1024,7 +1225,7 @@ function refreshSparks() {
   for (const ch of S.channels) {
     const el = document.querySelector(`[data-ch="${ch}"]`);
     if (!el) continue;
-    const buf = sensMode ? S.sensBuf[ch] : S.dataBuf[ch];
+    const buf = sensMode ? (S.sensRatio === "R/R0" ? S.sensBuf[ch] : S.sensBufInv[ch]) : S.dataBuf[ch];
     const arr = buf || [];
     const last = arr.length ? arr[arr.length - 1] : NaN;
     const color = segmentColor(ch, last);
@@ -1056,18 +1257,26 @@ function updateCalIndicators() {
   }
 }
 
-function resetSession() {
+// M6：新場次開始前，先把上一場未寫出的資料存下來再清空。
+// 記錄中的資料一律走 stopRecording(true)（使用者可見的存檔）；分段緩衝先 flush。
+// 只有存檔完成（或使用者取消存檔）後才清空，避免手動斷開再連接時整段記錄被靜默丟棄。
+async function resetSession() {
+  clearNoDataTimer(); // M4：舊場次的看門狗作廢，由 esp32Setup 重新武裝
+  if ((S.csvRows.length || S.prevDownloadRows.length) && S.hasData) {
+    try { await flushSegment(); } catch {}
+  }
+  if (S.recording) await stopRecording(true);
   Object.assign(S, {
     channels: [], hasData: false, startTime: performance.now(), lastRecordSec: 0,
     accum: {}, tempAcc: [], humdAcc: [],
-    timeBuf: [], dataBuf: {}, sensBuf: {}, tempBuf: [], humdBuf: [],
-    r0: {}, hasR0: false, csvRows: [], lineBuf: "",
+    timeBuf: [], dataBuf: {}, sensBuf: {}, sensBufInv: {}, tempBuf: [], humdBuf: [],
+    r0: {}, hasR0: false, csvRows: [], prevDownloadRows: [], lineBuf: "",
+    seq: {}, droppedLines: 0, lastDropWarn: 0,
     segStart: performance.now(), segFileHandle: null, calDone: [],
   });
   mainChart.clear(); mainChart.resetVisible();
   $("chGrid").innerHTML = "";
   $("chartInfo").textContent = "等待資料…";
-  if (S.recording) stopRecording(false);
   updateCalIndicators(); updateWorkflowUI();
 }
 
@@ -1126,16 +1335,6 @@ function updateConnModeUI() {
   $("gpibRow").hidden = !gpib;
   $("baudRow").hidden = gpib;
   $("btnConnect").textContent = !isScpi ? "連接 COM" : (gpib ? "連接 GPIB" : "連接");
-  const hint = $("connHint");
-  if (!isScpi) {
-    hint.textContent = "僅 Chrome / Edge 支援 Web Serial。頁面需經 HTTPS 開啟。";
-  } else if (gpib) {
-    hint.textContent = "GPIB 模式：先啟動本機橋接程式再按「連接 GPIB」。可按「啟動橋接」按鈕（需先執行一次 install_protocol.bat 註冊協定），或設開機自動啟動。橋接程式為通用 SCPI 轉發，Keithley 2400 與 Agilent 34401A 皆可用。NI GPIB-USB-HS 不會出現在瀏覽器 COM 選單中，這是正常的。";
-  } else if (S.instrument === "agilent") {
-    hint.textContent = "RS-232 直連：請用 USB 轉 RS-232 線接 34401A 背板 RS-232 孔，儀器介面設為 RS-232（Utility → I/O），鮑率預設 9600。";
-  } else {
-    hint.textContent = "RS-232 直連：請用 USB 轉 RS-232 線接儀器背板 RS-232 孔，儀器面板切到 RS-232（MENU → COMMUNICATION）。";
-  }
 }
 async function setInstrument(mode) {
   if (mode !== "esp32" && mode !== "keithley" && mode !== "agilent") return;
@@ -1164,7 +1363,7 @@ function csvHeader() {
   if (S.instrument === "agilent") {
     return ["Time(s)", "Function", "Reading", "Unit"];
   }
-  return ["Time(s)", ...S.channels, "TEMP", "HUMD"];
+  return ["Time(s)", "Timer(s)", ...S.channels, "TEMP", "HUMD"];
 }
 function buildCSVText(rows) {
   return "\uFEFF" + [csvHeader(), ...rows].map((r) => r.join(",")).join("\r\n");
@@ -1182,37 +1381,50 @@ function stamp() {
 }
 
 // 自動分段：時間到就把 csvRows 追加到同一檔案並清空記憶體
-async function flushSegment() {  if (S.segBusy || !S.csvRows.length || !S.hasData) return;
+// M7：下載模式無法確認瀏覽器是否真的存下檔案，所以下載觸發後不直接丟棄
+// 本段資料——先移到 prevDownloadRows，下次分段再隨新資料一併下載一次，
+// 之後才丟棄（每段至少被提供下載兩次）；只有資料夾寫入成功才立即清空。
+async function flushSegment() {
+  if (S.segBusy || (!S.csvRows.length && !S.prevDownloadRows.length) || !S.hasData) return;
   S.segBusy = true;
+  // S1：先把本批從 S.csvRows 切出來，寫入期間（await）新到的資料留在 S.csvRows，不會被寫完後的清空一起丟掉
+  const prevN = S.prevDownloadRows.length;
+  const batch = S.csvRows.splice(0);
+  const rows = [...S.prevDownloadRows, ...batch];
   try {
-    const n = S.csvRows.length;
     if (S.dirHandle) {
       // 同一場量測共用一個檔：首次分段建檔，之後追加
       if (!S.segFileHandle) {
         S.segFileHandle = await S.dirHandle.getFileHandle(`omx_${stamp()}.csv`, { create: true });
       }
       const f = await S.segFileHandle.getFile();
-      const body = S.csvRows.map((r) => r.join(",")).join("\r\n") + "\r\n";
+      const body = rows.map((r) => r.join(",")).join("\r\n") + "\r\n";
       const text = (f.size === 0 ? "\uFEFF" + csvHeader().join(",") + "\r\n" : "") + body;
       const w = await S.segFileHandle.createWritable({ keepExistingData: true });
       await w.seek(f.size);
       await w.write(text);
       await w.close();
-      log(`分段存檔：已追加 ${n} 筆 → 所選資料夾（同一檔案累積）。`);
+      log(`分段存檔：已追加 ${rows.length} 筆 → 所選資料夾（同一檔案累積）。`);
+      S.prevDownloadRows = []; // 本批已寫入；寫入期間新到的資料仍在 S.csvRows，不清空
     } else {
       // 下載模式無法追加，維持每段一個檔
+      if (!S.downloadWarned) {
+        S.downloadWarned = true;
+        log("提醒：下載模式下瀏覽器可能阻擋多次自動下載，請在網址列允許本站自動下載多個檔案，否則分段檔可能無法儲存。");
+      }
       const filename = `omx_${stamp()}.csv`;
-      const text = buildCSVText(S.csvRows);
+      const text = buildCSVText(rows);
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
       a.download = filename;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-      log(`分段存檔：${filename}（${n} 筆）→ 已下載。`);
+      log(`分段存檔：${filename}（${rows.length} 筆${prevN ? `，含上段未確認的 ${prevN} 筆` : ""}）→ 已下載（下載模式無法確認是否成功，本段將於下次分段再下載一次）。`);
+      S.prevDownloadRows = batch; // 下次再提供一次（沿用每段至少兩次的備援）
     }
-    S.csvRows = [];
     S.segStart = performance.now();
   } catch (e) {
+    S.csvRows.unshift(...batch); // 寫入失敗：本批放回佇列，下次再試
     log(`分段存檔失敗：${e.message}`);
   } finally {
     S.segBusy = false;
@@ -1314,7 +1526,7 @@ function updateRecUI() {
   if (!btn) return;
   btn.textContent = S.recording ? "停止記錄" : "開始記錄";
   btn.classList.toggle("recording", S.recording);
-  if (st) { st.textContent = S.recording ? "● 紀錄中" : "未記錄"; st.classList.toggle("rec-on", S.recording); }
+  if (st) { const t = $("recText"); if (t) t.textContent = S.recording ? "紀錄中" : "未記錄"; st.classList.toggle("rec-on", S.recording); }
   updateWorkflowUI();
 }
 async function writeTextToDir(dir, filename, text) {
@@ -1323,45 +1535,61 @@ async function writeTextToDir(dir, filename, text) {
   await w.write(text);
   await w.close();
 }
+// 儲存已記錄的三份資料（資料夾寫入優先，否則下載）；回傳是否已處置
+// （存檔成功或已觸發下載）。使用者取消時回傳 false，資料保留不清空。
+async function saveRecordedRows() {
+  if (!S.recResRows.length) return true;
+  const n = S.recResRows.length;
+  const st = stamp();
+  const resName = `gas_resistance_${st}.csv`;
+  const sensName = `gas_sensitivity_R_R0_${st}.csv`;
+  const sensInvName = `gas_sensitivity_R0_R_${st}.csv`;
+  // 三檔只問一次位置：已選過分段資料夾就直接寫入該夾，否則彈一次
+  // 資料夾選擇、三檔都寫進去；資料夾寫入不可用或被取消時，才退回
+  // 原本的多次自動下載，避免資料沒存到。
+  let saved = false, cancelled = false;
+  const tryDir = async (dir) => {
+    await writeTextToDir(dir, resName, buildCSVText(S.recResRows));
+    await writeTextToDir(dir, sensName, buildCSVText(S.recSensRows));
+    await writeTextToDir(dir, sensInvName, buildCSVText(S.recSensRowsInv));
+    log(`記錄停止，已寫入 ${dir.name}：${resName}、${sensName}、${sensInvName}（${n} 筆）。`);
+  };
+  if ("showDirectoryPicker" in window) {
+    try {
+      if (S.dirHandle) { await tryDir(S.dirHandle); saved = true; }
+    } catch (e) { log(`寫入已選資料夾失敗：${e.message}，改請選擇資料夾。`); }
+    if (!saved) {
+      try {
+        const dir = await window.showDirectoryPicker({ mode: "readwrite" });
+        await tryDir(dir); saved = true;
+      } catch (e) {
+        if (e.name === "AbortError") { cancelled = true; log("儲存已取消，記錄資料未寫出。"); }
+        else log(`寫入資料夾失敗，改用下載：${e.message}`);
+      }
+    }
+  }
+  if (!saved && !cancelled) {
+    downloadCSV(resName, S.recResRows);
+    downloadCSV(sensName, S.recSensRows);
+    downloadCSV(sensInvName, S.recSensRowsInv);
+    log(`記錄停止，已下載 ${n} 筆。`);
+    saved = true;
+  }
+  return saved;
+}
+
+// S2：只有存檔成功（或已觸發下載）才清空；使用者取消儲存時保留資料，
+// 再按開始記錄會先重試儲存，不會被新記錄靜默蓋掉。
 async function stopRecording(download = true) {
   if (!S.recording) return;
   S.recording = false;
   updateRecUI();
-  if (download && S.recResRows.length) {
-    const n = S.recResRows.length;
-    const st = stamp();
-    const resName = `gas_resistance_${st}.csv`;
-    const sensName = `gas_senstivity_${st}.csv`;
-    // 兩檔只問一次位置：已選過分段資料夾就直接寫入該夾，否則彈一次
-    // 資料夾選擇、兩檔都寫進去；資料夾寫入不可用或被取消時，才退回
-    // 原本的兩次自動下載，避免資料沒存到。
-    let saved = false, cancelled = false;
-    const tryDir = async (dir) => {
-      await writeTextToDir(dir, resName, buildCSVText(S.recResRows));
-      await writeTextToDir(dir, sensName, buildCSVText(S.recSensRows));
-      log(`記錄停止，已寫入 ${dir.name}：${resName}、${sensName}（${n} 筆）。`);
-    };
-    if ("showDirectoryPicker" in window) {
-      try {
-        if (S.dirHandle) { await tryDir(S.dirHandle); saved = true; }
-      } catch (e) { log(`寫入已選資料夾失敗：${e.message}，改請選擇資料夾。`); }
-      if (!saved) {
-        try {
-          const dir = await window.showDirectoryPicker({ mode: "readwrite" });
-          await tryDir(dir); saved = true;
-        } catch (e) {
-          if (e.name === "AbortError") { cancelled = true; log("儲存已取消，記錄資料未寫出。"); }
-          else log(`寫入資料夾失敗，改用下載：${e.message}`);
-        }
-      }
-    }
-    if (!saved && !cancelled) {
-      downloadCSV(resName, S.recResRows);
-      downloadCSV(sensName, S.recSensRows);
-      log(`記錄停止，已下載 ${n} 筆。`);
-    }
+  const saved = download ? await saveRecordedRows() : true;
+  if (saved) {
+    S.recResRows = []; S.recSensRows = []; S.recSensRowsInv = [];
+  } else {
+    log("記錄資料仍保留，再按開始記錄會先重試儲存。");
   }
-  S.recResRows = []; S.recSensRows = [];
 }
 
 /* ---------------- ADC 校正 ---------------- */
@@ -1393,21 +1621,20 @@ function medianOf(arr) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 function sleepMs(ms) { return new Promise((r) => setTimeout(r, ms)); }
-async function waitForFreshSamples(ch, fromLen, need, timeoutMs) {
+async function waitForFreshSamples(ch, fromSeq, need, timeoutMs) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const buf = S.dataBuf[ch] || [];
-    if (buf.length >= fromLen + need) return buf.slice(-need);
+    // 以單調計數 S.seq 判斷新樣本，不用 buffer 長度（buffer 滿 3600 後長度不再前進）
+    if ((S.seq[ch] || 0) >= fromSeq + need) return (S.dataBuf[ch] || []).slice(-need);
     if (!S.connected) throw new Error("連線已中斷");
     await sleepMs(200);
   }
   throw new Error("等不到新的量測資料（逾時）");
 }
 async function readChannelMedian(ch) {
-  const buf = S.dataBuf[ch] || [];
   // 每筆平均值約 S.interval 秒一筆，留 2 筆的緩衝再加 5 秒給韌體反應
   const timeoutMs = Math.max(15000, (2 + 2) * (S.interval || 1) * 1000 + 5000);
-  const samples = await waitForFreshSamples(ch, buf.length, 2, timeoutMs);
+  const samples = await waitForFreshSamples(ch, S.seq[ch] || 0, 2, timeoutMs);
   return medianOf(samples);
 }
 async function sendAdcValues(vs) {
@@ -1631,7 +1858,6 @@ function bindEvents() {
   };
   if (!("showDirectoryPicker" in window)) {
     $("btnPickDir").disabled = true;
-    $("segHint").textContent = "此瀏覽器不支援直接寫入資料夾，分段將以自動下載方式保存（檔名含時間戳）。";
   }
 
   $("segSel").onchange = (e) => {
@@ -1660,19 +1886,18 @@ function bindEvents() {
     const isSens = S.mode === "SENSITIVITY";
     $("btnMode").textContent = isSens ? "靈敏度模式" : "電阻模式";
     $("btnMode").classList.toggle("on", isSens);
-    $("chartTitle").textContent = isSens ? "即時監控圖 — 靈敏度 (R/R0)" : "即時監控圖 — 電阻 (kΩ)";
-    // 重建圖表序列以切換數值
-    mainChart.clear();
-    for (const ch of S.channels) mainChart.setSeries(ch, channelColorOf(ch));
-    const n = S.timeBuf.length;
-    for (let i = 0; i < n; i++) {
-      const t = S.timeBuf[i];
-      for (const ch of S.channels) {
-        const buf = isSens ? S.sensBuf[ch] : S.dataBuf[ch];
-        if (buf[i] !== undefined) mainChart.push(ch, t, buf[i]);
-      }
-    }
+    $("chartTitle").textContent = isSens ? `即時監控圖 — 靈敏度 (${S.sensRatio})` : "即時監控圖 — 電阻 (kΩ)";
+    $("btnSensRatio").style.display = isSens ? "" : "none";
+    rebuildMainChart();
     log(`切換為${isSens ? "靈敏度" : "電阻"}模式。`);
+  };
+
+  $("btnSensRatio").onclick = () => {
+    S.sensRatio = S.sensRatio === "R/R0" ? "R0/R" : "R/R0";
+    $("btnSensRatio").textContent = S.sensRatio;
+    $("chartTitle").textContent = `即時監控圖 — 靈敏度 (${S.sensRatio})`;
+    rebuildMainChart();
+    log(`靈敏度切換為 ${S.sensRatio}。`);
   };
 
   $("btnR0").onclick = () => {
@@ -1681,25 +1906,46 @@ function bindEvents() {
       const b = S.dataBuf[ch];
       if (b.length) S.r0[ch] = b[b.length - 1];
     }
-    // 靈敏度緩衝需重算
+    // 靈敏度緩衝需重算（R/R0 與 R0/R 兩種都算）
     for (const ch of S.channels) {
       S.sensBuf[ch] = S.dataBuf[ch].map((v) => (S.r0[ch] ? v / S.r0[ch] : 1));
+      S.sensBufInv[ch] = S.dataBuf[ch].map((v) => (v ? S.r0[ch] / v : 1));
     }
     log("設置 Rair 成功（以目前最新值為基準）。");
   };
 
-  $("btnRecToggle").onclick = () => {
+  $("btnRecToggle").onclick = async () => {
     if (S.recording) { stopRecording(true); return; }
+    // 上次停止時取消儲存、資料仍保留：先重試儲存，存好再開始新記錄
+    if (S.recResRows.length) {
+      const saved = await saveRecordedRows();
+      if (!saved) { log("尚有未儲存的記錄資料，請先完成儲存再開始新記錄。"); return; }
+      S.recResRows = []; S.recSensRows = []; S.recSensRowsInv = [];
+    }
     if (!S.hasData) { log("尚未收到通道資料，無法開始記錄。"); return; }
-    S.recording = true; S.recResRows = []; S.recSensRows = [];
+    S.recording = true; S.recResRows = []; S.recSensRows = []; S.recSensRowsInv = [];
     updateRecUI();
     log("開始手動記錄。");
   };
 
-  $("btnTimerStart").onclick = () => { S.timerRunning = true; };
-  $("btnTimerStop").onclick = () => { S.timerRunning = false; };
-  $("btnTimerReset").onclick = () => { S.timerRunning = false; S.timerSec = 0; drawTimer(); };
-  setInterval(() => { if (S.timerRunning) { S.timerSec++; drawTimer(); } }, 1000);
+  // M2：碼表改以 performance.now() 時間戳計時，不再數 setInterval tick，
+  // 背景分頁計時器被節流也不會落後——回來時由時間戳直接算出正確秒數。
+  // 開始／歸零同一按鈕：沒跑按「計時開始」起跑，跑著按「歸零」停止並歸零（不記分圈）。
+  const syncTimerBtn = () => { $("btnTimerToggle").textContent = S.timerRunning ? "歸零" : "計時開始"; };
+  $("btnTimerToggle").onclick = () => {
+    if (S.timerRunning) {
+      S.timerRunning = false; S.timerStartMs = 0; S.timerAccumMs = 0; S.timerSec = 0; drawTimer();
+    } else {
+      S.timerRunning = true; S.timerStartMs = performance.now();
+    }
+    syncTimerBtn();
+  };
+  setInterval(() => {
+    if (S.timerRunning) {
+      S.timerSec = Math.floor((S.timerAccumMs + performance.now() - S.timerStartMs) / 1000);
+      drawTimer();
+    }
+  }, 1000);
 
   $("btnChPrev").onclick = () => { S.chView = "page"; if (S.chPage > 0) S.chPage--; renderChannelGrid(); };
   $("btnChNext").onclick = () => {
@@ -1721,7 +1967,19 @@ function bindEvents() {
     };
   }
 
-  window.addEventListener("beforeunload", () => {
+  // M2：分頁隱藏時盡力先把當前分段寫出（背景計時器會被節流到約 1 分鐘一次，
+  // 不能只靠它）；回到可見時 Wake Lock 已被瀏覽器自動釋放，需重新請求。
+  // 下載模式跳過隱藏寫出：沒選資料夾時每次切分頁都會觸發一次下載跳窗；
+  // 只在資料夾模式才寫出（無聲寫入）。下載模式仍靠分段計時與關頁下載。
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      if (S.recording && S.csvRows.length && S.dirHandle) flushSegment().catch(() => {});
+    } else if (S.connected) {
+      requestWakeLock();
+    }
+  });
+
+  window.addEventListener("beforeunload", (e) => {
     // Keithley 安全：盡力關閉 Output（不等待回應；GPIB 經 WebSocket 同步送出）
     if (S.instrument === "keithley" && S.connected && S.k.outputOn) {
       try { writeLine(":OUTP OFF\n").catch(() => {}); } catch {}
@@ -1729,14 +1987,26 @@ function bindEvents() {
     if (S.recording && S.recResRows.length) {
       downloadCSV(`gas_resistance_${stamp()}.csv`, S.recResRows);
     }
+    // M6：記錄中或仍有未寫出的分段資料時，跳出離開確認，避免整段資料靜默遺失。
+    // 下載嘗試仍保留（見上方），警告只是多一道防線。
+    if (S.recording || S.csvRows.length || S.prevDownloadRows.length || S.recResRows.length) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
   });
 }
 
+function fmtHMS(sec) {
+  const h = String(Math.floor(sec / 3600)).padStart(2, "0");
+  const m = String(Math.floor((sec % 3600) / 60)).padStart(2, "0");
+  const s = String(sec % 60).padStart(2, "0");
+  return `${h}:${m}:${s}`;
+}
+function currentTimerSec() {
+  return S.timerRunning ? Math.floor((S.timerAccumMs + performance.now() - S.timerStartMs) / 1000) : S.timerSec;
+}
 function drawTimer() {
-  const h = String(Math.floor(S.timerSec / 3600)).padStart(2, "0");
-  const m = String(Math.floor((S.timerSec % 3600) / 60)).padStart(2, "0");
-  const s = String(S.timerSec % 60).padStart(2, "0");
-  $("timerDisplay").textContent = `${h}:${m}:${s}`;
+  $("timerDisplay").textContent = fmtHMS(S.timerSec);
 }
 
 /* ---------------- Sensor 標籤 ---------------- */
