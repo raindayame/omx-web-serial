@@ -47,7 +47,7 @@ const S = {
   interval: 1, startTime: 0, lastRecordSec: 0,
   accum: {}, tempAcc: [], humdAcc: [],
   timeBuf: [], dataBuf: {}, sensBuf: {}, sensBufInv: {}, tempBuf: [], humdBuf: [],
-  r0: {}, hasR0: false,
+  r0: {}, hasR0: false, rawHist: {},
   mode: "RESISTANCE", sensRatio: "R/R0",
   legendMode: "end", // 圖例：end＝右側直排標籤（新版），top＝上方橫排圖例（舊版）
   csvRows: [], recording: false, recResRows: [], recSensRows: [], recSensRowsInv: [],
@@ -1001,7 +1001,13 @@ function handleLine(line) {
 
   const tm = line.match(/([-0-9.]+)TEMP/);
   const hm = line.match(/([-0-9.]+)HUMD/);
-  for (const ch of S.channels) if (ch in parsed) S.accum[ch].push(parsed[ch]);
+  const lineMs = performance.now();
+  for (const ch of S.channels) if (ch in parsed) {
+    S.accum[ch].push(parsed[ch]);
+    const h = (S.rawHist[ch] = S.rawHist[ch] || []);
+    h.push([lineMs, parsed[ch]]);
+    while (h.length && h[0][0] < lineMs - 10000) h.shift();
+  }
   if (tm && isNumStr(tm[1])) { const v = parseFloat(tm[1]); if (Number.isFinite(v)) S.tempAcc.push(v); }
   if (hm && isNumStr(hm[1])) { const v = parseFloat(hm[1]); if (Number.isFinite(v)) S.humdAcc.push(v); }
 
@@ -1053,6 +1059,36 @@ function recordSample(recordSec) {
     S.recSensRowsInv.push([recordSec, timerSec, ...S.channels.map((ch) => (hasSample[ch] ? sensInv[ch].toFixed(4) : "")), avgT.toFixed(2), avgH.toFixed(2)]);
   }
   updateLiveUI(avg, S.sensRatio === "R/R0" ? sens : sensInv, avgT, avgH, recordSec);
+}
+
+// 計時開始時自動擷取 R0：取「按下計時前 5 秒」那一刻的原始讀值
+// （單筆即時值，不平均），再以新 R0 重算整條靈敏度緩衝並重畫
+// 主圖。無有效讀值時不動，保留既有 R0（首筆平均值或上次手動設置）。
+function captureR0FromHistory() {
+  if (!S.hasData) { log("自動擷取 R0：尚無資料，保留既有 R0。"); return; }
+  const target = performance.now() - 5000;
+  let n = 0;
+  for (const ch of S.channels) {
+    const hist = S.rawHist[ch];
+    if (!hist || !hist.length) continue;
+    let best = hist[0], bestDt = Math.abs(hist[0][0] - target);
+    for (const e of hist) {
+      const dt = Math.abs(e[0] - target);
+      if (dt < bestDt) { best = e; bestDt = dt; }
+    }
+    const v = best[1];
+    if (!Number.isFinite(v) || v === 0) continue;
+    S.r0[ch] = v; n++;
+  }
+  if (!n) { log("自動擷取 R0：計時開始前 5 秒無有效讀值，保留既有 R0。"); return; }
+  S.hasR0 = true;
+  for (const ch of S.channels) {
+    if (!S.dataBuf[ch]) continue;
+    S.sensBuf[ch] = S.dataBuf[ch].map((v) => (S.r0[ch] ? v / S.r0[ch] : 1));
+    S.sensBufInv[ch] = S.dataBuf[ch].map((v) => (v ? S.r0[ch] / v : 1));
+  }
+  rebuildMainChart();
+  log(`R0 已自動擷取（計時開始前 5 秒即時值，${n} 通道）。`);
 }
 
 // 依目前模式與靈敏度比值（R/R0 或 R0/R）重建主圖序列
@@ -1289,7 +1325,7 @@ async function resetSession() {
     channels: [], hasData: false, startTime: performance.now(), lastRecordSec: 0,
     accum: {}, tempAcc: [], humdAcc: [],
     timeBuf: [], dataBuf: {}, sensBuf: {}, sensBufInv: {}, tempBuf: [], humdBuf: [],
-    r0: {}, hasR0: false, csvRows: [], prevDownloadRows: [], lineBuf: "",
+    r0: {}, hasR0: false, rawHist: {}, csvRows: [], prevDownloadRows: [], lineBuf: "",
     seq: {}, droppedLines: 0, lastDropWarn: 0,
     segStart: performance.now(), segFileHandle: null, calDone: [],
   });
@@ -1937,6 +1973,7 @@ function bindEvents() {
       S.sensBuf[ch] = S.dataBuf[ch].map((v) => (S.r0[ch] ? v / S.r0[ch] : 1));
       S.sensBufInv[ch] = S.dataBuf[ch].map((v) => (v ? S.r0[ch] / v : 1));
     }
+    rebuildMainChart(); // R0 變更後立即重畫，舊點也用新 R0
     log("設置 Rair 成功（以目前最新值為基準）。");
   };
 
@@ -1957,14 +1994,26 @@ function bindEvents() {
   // M2：碼表改以 performance.now() 時間戳計時，不再數 setInterval tick，
   // 背景分頁計時器被節流也不會落後——回來時由時間戳直接算出正確秒數。
   // 開始／歸零同一按鈕：沒跑按「計時開始」起跑，跑著按「歸零」停止並歸零（不記分圈）。
-  const syncTimerBtn = () => { $("btnTimerToggle").textContent = S.timerRunning ? "歸零" : "計時開始"; };
+  const syncTimerBtn = () => {
+    $("btnTimerToggle").textContent = S.timerRunning ? "歸零" : "計時開始";
+    $("btnTimerStartR0").disabled = S.timerRunning; // 計時跑著時不能再按「計時開始，設置Rair」
+  };
+  const startTimer = (withR0) => {
+    S.timerRunning = true; S.timerStartMs = performance.now();
+    if (withR0 && S.instrument === "esp32") captureR0FromHistory(); // 計時開始，設置Rair：取 5 秒前的即時值當 R0
+    syncTimerBtn();
+  };
   $("btnTimerToggle").onclick = () => {
     if (S.timerRunning) {
       S.timerRunning = false; S.timerStartMs = 0; S.timerAccumMs = 0; S.timerSec = 0; drawTimer();
     } else {
-      S.timerRunning = true; S.timerStartMs = performance.now();
+      startTimer(false);
     }
     syncTimerBtn();
+  };
+  $("btnTimerStartR0").onclick = () => {
+    if (S.timerRunning) return;
+    startTimer(true);
   };
   setInterval(() => {
     if (S.timerRunning) {
