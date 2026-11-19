@@ -1,0 +1,1933 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sputter 電漿沉積互動模擬預覽 | Magnetron Sputtering Preview</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #070b14;
+      color: #e2e8f0;
+    }
+    .font-mono-tech {
+      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    /* Custom sleek range sliders */
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      background: transparent;
+      cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-runnable-track {
+      height: 6px;
+      border-radius: 9999px;
+      background: #1e293b;
+      border: 1px solid #334155;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #38bdf8;
+      border: 2px solid #0f172a;
+      margin-top: -6px;
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.55);
+      transition: transform 0.12s ease, background-color 0.15s ease;
+    }
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.15);
+    }
+    input[type="range"].slider-ar::-webkit-slider-thumb { background: #a78bfa; box-shadow: 0 0 8px rgba(167, 139, 250, 0.6); }
+    input[type="range"].slider-o2::-webkit-slider-thumb { background: #38bdf8; box-shadow: 0 0 8px rgba(56, 189, 248, 0.6); }
+    input[type="range"].slider-n2::-webkit-slider-thumb { background: #f472b6; box-shadow: 0 0 8px rgba(244, 114, 182, 0.6); }
+    input[type="range"].slider-pwr::-webkit-slider-thumb { background: #fbbf24; box-shadow: 0 0 8px rgba(251, 191, 36, 0.6); }
+
+    input[type="range"]::-moz-range-track {
+      height: 6px;
+      border-radius: 9999px;
+      background: #1e293b;
+      border: 1px solid #334155;
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #38bdf8;
+      border: 2px solid #0f172a;
+    }
+    .panel-glass {
+      background: linear-gradient(180deg, rgba(17, 24, 39, 0.92) 0%, rgba(11, 16, 28, 0.95) 100%);
+      border: 1px solid rgba(51, 65, 85, 0.65);
+      box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.65);
+    }
+    .stage-pill {
+      transition: all 0.2s ease;
+    }
+    .stage-pill.active {
+      background: rgba(56, 189, 248, 0.16);
+      border-color: rgba(56, 189, 248, 0.75);
+      color: #f0f9ff;
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.22);
+    }
+    .stage-pill.done {
+      background: rgba(16, 185, 129, 0.12);
+      border-color: rgba(16, 185, 129, 0.45);
+      color: #a7f3d0;
+    }
+    .stage-pill.error {
+      background: rgba(239, 68, 68, 0.16);
+      border-color: rgba(239, 68, 68, 0.7);
+      color: #fecaca;
+    }
+    /* Hide number input spinners for clean numeric boxes */
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    input[type="number"] {
+      -moz-appearance: textfield;
+    }
+  </style>
+</head>
+<body class="min-h-screen antialiased selection:bg-sky-500/30 selection:text-sky-200">
+  <div class="max-w-[1440px] mx-auto px-3 sm:px-5 py-4 space-y-4">
+    <!-- Top Header -->
+    <header class="panel-glass rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500/25 via-sky-500/20 to-fuchsia-500/25 border border-sky-400/30 flex items-center justify-center shrink-0">
+          <i data-lucide="zap" class="w-5 h-5 text-sky-400"></i>
+        </div>
+        <div>
+          <h1 class="text-base sm:text-lg font-bold tracking-tight text-slate-100 leading-tight">
+            Sputter 電漿沉積互動預覽
+          </h1>
+          <p class="text-xs text-slate-400">
+            磁控濺鍍腔體即時模擬 · 電漿激發過程 · 反應氣體與薄膜成長
+          </p>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <button id="btnIgnite" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-sky-500 hover:bg-sky-400 text-slate-950 transition shadow-lg shadow-sky-500/20">
+          <i data-lucide="flame" class="w-4 h-4"></i>
+          <span id="btnIgniteLabel">點火激發電漿</span>
+        </button>
+        <button id="btnReplay" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition" title="從抽真空重播完整電漿激發過程">
+          <i data-lucide="rotate-ccw" class="w-4 h-4 text-violet-400"></i>
+          <span>重播激發過程</span>
+        </button>
+        <button id="btnPause" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition">
+          <i data-lucide="pause" class="w-4 h-4 text-amber-400"></i>
+          <span id="btnPauseLabel">暫停</span>
+        </button>
+        <button id="btnResetFilm" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition" title="清除基板薄膜與靶材刻蝕痕">
+          <i data-lucide="layers" class="w-4 h-4 text-emerald-400"></i>
+          <span>重置薄膜</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+      <!-- Left / Center Visualization Column -->
+      <div class="lg:col-span-8 space-y-4">
+        <!-- Chamber Canvas Card -->
+        <div class="panel-glass rounded-2xl p-3 sm:p-4 space-y-3">
+          <!-- Canvas Toolbar -->
+          <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div class="flex items-center gap-2">
+              <span id="statusDot" class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span id="statusHeader" class="font-semibold text-slate-200">電漿激發中...</span>
+              <span id="regimeBadge" class="px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-800 text-slate-300 border border-slate-700">金屬模式</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <label class="inline-flex items-center gap-1.5 cursor-pointer select-none px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700/80 hover:border-slate-600">
+                <input id="toggleBField" type="checkbox" checked class="accent-sky-400 w-3.5 h-3.5 rounded" />
+                <span class="text-slate-300">磁場線</span>
+              </label>
+              <label class="inline-flex items-center gap-1.5 cursor-pointer select-none px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700/80 hover:border-slate-600">
+                <input id="toggleLabels" type="checkbox" checked class="accent-sky-400 w-3.5 h-3.5 rounded" />
+                <span class="text-slate-300">腔體標示</span>
+              </label>
+              <label class="inline-flex items-center gap-1.5 cursor-pointer select-none px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700/80 hover:border-slate-600">
+                <input id="toggleParticles" type="checkbox" checked class="accent-sky-400 w-3.5 h-3.5 rounded" />
+                <span class="text-slate-300">粒子動畫</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Warning Banner (hidden by default) -->
+          <div id="warningBanner" class="hidden rounded-xl px-3.5 py-2.5 bg-amber-500/10 border border-amber-500/40 text-amber-200 text-xs flex items-start gap-2">
+            <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-400 shrink-0 mt-0.5"></i>
+            <span id="warningText"></span>
+          </div>
+
+          <!-- Vacuum Chamber Canvas -->
+          <div id="chamberContainer" class="relative w-full h-[360px] sm:h-[430px] rounded-xl overflow-hidden bg-[#050811] border border-slate-800">
+            <canvas id="chamberCanvas" class="block w-full h-full"></canvas>
+            <!-- Legend Overlay Bottom Left -->
+            <div class="pointer-events-none absolute bottom-2.5 left-2.5 flex flex-wrap gap-x-3 gap-y-1 px-2.5 py-1.5 rounded-lg bg-slate-950/75 backdrop-blur-sm border border-slate-800/80 text-[11px] text-slate-300">
+              <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-violet-400"></span>Ar / Ar⁺</span>
+              <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-sky-400"></span>O₂</span>
+              <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-pink-400"></span>N₂</span>
+              <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-300"></span>e⁻ 電子</span>
+              <span class="inline-flex items-center gap-1"><span id="legendTargetDot" class="w-2 h-2 rounded-full bg-slate-300"></span>濺鍍原子</span>
+            </div>
+          </div>
+
+          <!-- Plasma Ignition / Excitation Process Stepper -->
+          <div class="space-y-2.5 pt-1">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-semibold text-slate-300 flex items-center gap-1.5">
+                <i data-lucide="activity" class="w-3.5 h-3.5 text-sky-400"></i>
+                電漿激發過程 (點擊階段可切換檢視)
+              </span>
+              <span id="stageProgressText" class="font-mono-tech text-sky-400 text-[11px]">STAGE 0 / 5</span>
+            </div>
+            <div id="stageStepper" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-1.5">
+              <!-- Populated by JS -->
+            </div>
+            <div class="rounded-xl bg-slate-900/90 border border-slate-800 px-3.5 py-2.5 flex items-start gap-2.5">
+              <div class="w-6 h-6 rounded-lg bg-sky-500/15 border border-sky-500/30 flex items-center justify-center shrink-0 mt-0.5">
+                <i data-lucide="info" class="w-3.5 h-3.5 text-sky-400"></i>
+              </div>
+              <div class="text-xs leading-relaxed">
+                <span id="stageTitleDesc" class="font-semibold text-sky-300"></span>
+                <span id="stageBodyDesc" class="text-slate-300 ml-1"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Telemetry & Live OES Spectrum Row -->
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-4">
+          <!-- Telemetry KPIs -->
+          <div class="md:col-span-7 panel-glass rounded-2xl p-4 space-y-3">
+            <div class="flex items-center justify-between">
+              <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                <i data-lucide="gauge" class="w-4 h-4 text-sky-400"></i>
+                即時腔體與製程讀值
+              </h2>
+              <span id="filmFormulaBadge" class="font-mono-tech text-xs font-semibold px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-200 border border-indigo-400/40">TiN</span>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              <div class="rounded-xl bg-slate-900/90 border border-slate-800 p-2.5">
+                <div class="text-[11px] text-slate-400">工作壓力</div>
+                <div class="mt-0.5 font-mono-tech text-base font-semibold text-slate-100"><span id="valPressure">0.0</span> <span class="text-xs font-normal text-slate-400">mTorr</span></div>
+              </div>
+              <div class="rounded-xl bg-slate-900/90 border border-slate-800 p-2.5">
+                <div class="text-[11px] text-slate-400">靶材偏壓 (V)</div>
+                <div class="mt-0.5 font-mono-tech text-base font-semibold text-amber-300"><span id="valVoltage">0</span> <span class="text-xs font-normal text-slate-400">V</span></div>
+              </div>
+              <div class="rounded-xl bg-slate-900/90 border border-slate-800 p-2.5">
+                <div class="text-[11px] text-slate-400" id="lblCurrent">靶材電流 (I)</div>
+                <div class="mt-0.5 font-mono-tech text-base font-semibold text-sky-300"><span id="valCurrent">0.00</span> <span class="text-xs font-normal text-slate-400" id="unitCurrent">A</span></div>
+              </div>
+              <div class="rounded-xl bg-slate-900/90 border border-slate-800 p-2.5">
+                <div class="text-[11px] text-slate-400">沉積速率</div>
+                <div class="mt-0.5 font-mono-tech text-base font-semibold text-emerald-300"><span id="valDepRate">0.0</span> <span class="text-xs font-normal text-slate-400">nm/min</span></div>
+              </div>
+              <div class="rounded-xl bg-slate-900/90 border border-slate-800 p-2.5">
+                <div class="text-[11px] text-slate-400">累計膜厚</div>
+                <div class="mt-0.5 font-mono-tech text-base font-semibold text-violet-300"><span id="valThickness">0.0</span> <span class="text-xs font-normal text-slate-400">nm</span></div>
+              </div>
+              <div class="rounded-xl bg-slate-900/90 border border-slate-800 p-2.5">
+                <div class="text-[11px] text-slate-400">電漿密度</div>
+                <div class="mt-0.5 font-mono-tech text-base font-semibold text-fuchsia-300"><span id="valPlasmaDensity">0.0</span> <span class="text-xs font-normal text-slate-400">×10¹⁰/cm³</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Simulated OES Optical Emission Spectrum -->
+          <div class="md:col-span-5 panel-glass rounded-2xl p-4 flex flex-col justify-between space-y-2.5">
+            <div class="flex items-center justify-between">
+              <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                <i data-lucide="sparkles" class="w-4 h-4 text-fuchsia-400"></i>
+                即時光譜預覽 (OES)
+              </h2>
+              <span id="plasmaColorSwatch" class="inline-flex items-center gap-1.5 text-[11px] text-slate-300">
+                <span id="colorDot" class="w-2.5 h-2.5 rounded-full border border-white/30"></span>
+                <span id="colorName">紫藍輝光</span>
+              </span>
+            </div>
+            <div class="relative w-full h-[132px] rounded-xl bg-[#050811] border border-slate-800 overflow-hidden">
+              <canvas id="oesCanvas" class="block w-full h-full"></canvas>
+            </div>
+            <div class="flex justify-between text-[10px] font-mono-tech text-slate-500 px-1">
+              <span>300 nm (UV)</span>
+              <span>500 nm</span>
+              <span>700 nm</span>
+              <span>850 nm (NIR)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Parameter Control Panel -->
+      <aside class="lg:col-span-4 panel-glass rounded-2xl p-4 space-y-5">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+          <h2 class="text-sm font-semibold text-slate-100 flex items-center gap-2">
+            <i data-lucide="sliders" class="w-4 h-4 text-sky-400"></i>
+            製程參數設定
+          </h2>
+          <span class="text-[11px] text-slate-400">即時連動電漿</span>
+        </div>
+
+        <!-- Quick Presets -->
+        <div class="space-y-2">
+          <label class="text-xs font-medium text-slate-400 block">快速製程配方 (Presets)</label>
+          <div id="presetGrid" class="grid grid-cols-2 gap-1.5">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- Process & Target Selectors -->
+        <div class="grid grid-cols-2 gap-3">
+          <div class="space-y-1.5">
+            <label for="selectProcess" class="text-xs font-medium text-slate-300 flex items-center gap-1">
+              Process 模式
+            </label>
+            <select id="selectProcess" class="w-full rounded-xl bg-slate-900 border border-slate-700 px-3 py-2 text-xs sm:text-sm text-slate-100 focus:outline-none focus:border-sky-400 transition">
+              <option value="DC">DC Magnetron</option>
+              <option value="RF">RF (13.56 MHz)</option>
+              <option value="PulsedDC">Pulsed DC</option>
+              <option value="HiPIMS">HiPIMS</option>
+            </select>
+          </div>
+          <div class="space-y-1.5">
+            <label for="selectTarget" class="text-xs font-medium text-slate-300 flex items-center gap-1">
+              Target 靶材
+            </label>
+            <select id="selectTarget" class="w-full rounded-xl bg-slate-900 border border-slate-700 px-3 py-2 text-xs sm:text-sm text-slate-100 focus:outline-none focus:border-sky-400 transition">
+              <option value="Ti">Ti (鈦)</option>
+              <option value="Al">Al (鋁)</option>
+              <option value="Cu">Cu (銅)</option>
+              <option value="Si">Si (矽)</option>
+              <option value="Cr">Cr (鉻)</option>
+              <option value="ITO">ITO (氧化銦錫)</option>
+              <option value="Au">Au (金)</option>
+              <option value="SiO2">SiO₂ (絕緣靶)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Sliders + Numeric Inputs -->
+        <div class="space-y-4">
+          <!-- Power -->
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between">
+              <label for="numPower" class="text-xs font-medium text-amber-300 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+                Power (功率)
+              </label>
+              <div class="flex items-center gap-1">
+                <input id="numPower" type="number" min="0" max="1000" step="10" value="350" class="w-16 text-right font-mono-tech text-xs bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-slate-100 focus:outline-none focus:border-amber-400" />
+                <span class="text-xs text-slate-400 w-9">W</span>
+              </div>
+            </div>
+            <input id="rangePower" type="range" min="0" max="1000" step="5" value="350" class="w-full slider-pwr" />
+          </div>
+
+          <!-- Ar Flow -->
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between">
+              <label for="numAr" class="text-xs font-medium text-violet-300 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-violet-400"></span>
+                Ar Flow (氬氣流量)
+              </label>
+              <div class="flex items-center gap-1">
+                <input id="numAr" type="number" min="0" max="100" step="1" value="40" class="w-16 text-right font-mono-tech text-xs bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-slate-100 focus:outline-none focus:border-violet-400" />
+                <span class="text-xs text-slate-400 w-9">sccm</span>
+              </div>
+            </div>
+            <input id="rangeAr" type="range" min="0" max="100" step="1" value="40" class="w-full slider-ar" />
+          </div>
+
+          <!-- O2 Flow -->
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between">
+              <label for="numO2" class="text-xs font-medium text-sky-300 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-sky-400"></span>
+                O₂ Flow (氧氣流量)
+              </label>
+              <div class="flex items-center gap-1">
+                <input id="numO2" type="number" min="0" max="50" step="0.5" value="0" class="w-16 text-right font-mono-tech text-xs bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-slate-100 focus:outline-none focus:border-sky-400" />
+                <span class="text-xs text-slate-400 w-9">sccm</span>
+              </div>
+            </div>
+            <input id="rangeO2" type="range" min="0" max="50" step="0.5" value="0" class="w-full slider-o2" />
+          </div>
+
+          <!-- N2 Flow -->
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between">
+              <label for="numN2" class="text-xs font-medium text-pink-300 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-pink-400"></span>
+                N₂ Flow (氮氣流量)
+              </label>
+              <div class="flex items-center gap-1">
+                <input id="numN2" type="number" min="0" max="50" step="0.5" value="8" class="w-16 text-right font-mono-tech text-xs bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-slate-100 focus:outline-none focus:border-pink-400" />
+                <span class="text-xs text-slate-400 w-9">sccm</span>
+              </div>
+            </div>
+            <input id="rangeN2" type="range" min="0" max="50" step="0.5" value="8" class="w-full slider-n2" />
+          </div>
+        </div>
+
+        <!-- Gas Ratio Bar -->
+        <div class="space-y-1.5 pt-1">
+          <div class="flex justify-between text-[11px] text-slate-400">
+            <span>氣體組成比例</span>
+            <span id="gasRatioLabel" class="font-mono-tech text-slate-300">Ar 83% · N₂ 17%</span>
+          </div>
+          <div class="h-2.5 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden flex">
+            <div id="barAr" class="bg-violet-500 transition-all duration-200" style="width: 83%"></div>
+            <div id="barO2" class="bg-sky-400 transition-all duration-200" style="width: 0%"></div>
+            <div id="barN2" class="bg-pink-400 transition-all duration-200" style="width: 17%"></div>
+          </div>
+        </div>
+
+        <!-- Target & Process Info Card -->
+        <div class="rounded-xl bg-slate-900/80 border border-slate-800 p-3 space-y-2 text-xs">
+          <div class="flex items-center justify-between">
+            <span class="text-slate-400">靶材特性</span>
+            <span id="infoTargetNote" class="font-medium text-slate-200">Ti · 導電金屬靶</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-slate-400">放電模式</span>
+            <span id="infoProcessNote" class="font-medium text-slate-200">直流磁控 · 高沉積率</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-slate-400">預估薄膜特性</span>
+            <span id="infoFilmNote" class="font-medium text-amber-300">TiN · 金黃色硬質薄膜</span>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      // =========================================================
+      // 1. Physical Models & Metadata
+      // =========================================================
+      const TARGETS = {
+        Ti: {
+          name: 'Ti (鈦)',
+          conductive: true,
+          baseYield: 0.55,
+          metalColor: '#94a3b8',
+          atomColor: '#cbd5e1',
+          emissionRGB: [180, 210, 255],
+          emissionPeakNm: 498,
+          note: '導電金屬靶 · 易與 O₂/N₂ 反應',
+          films: {
+            metal: { formula: 'Ti', color: '#94a3b8', desc: 'Ti · 銀灰色金屬附著層' },
+            oxide: { formula: 'TiO₂', color: '#7dd3fc', desc: 'TiO₂ · 高折射率透明氧化膜' },
+            nitride: { formula: 'TiN', color: '#eab308', desc: 'TiN · 金黃色耐磨硬質膜' },
+            oxynitride: { formula: 'TiOₓNᵧ', color: '#a855f7', desc: 'TiOₓNᵧ · 紫金色氧氮化膜' }
+          }
+        },
+        Al: {
+          name: 'Al (鋁)',
+          conductive: true,
+          baseYield: 1.05,
+          metalColor: '#cbd5e1',
+          atomColor: '#e2e8f0',
+          emissionRGB: [210, 230, 255],
+          emissionPeakNm: 396,
+          note: '導電金屬靶 · 易氧化毒化',
+          films: {
+            metal: { formula: 'Al', color: '#e2e8f0', desc: 'Al · 高反射銀白導電膜' },
+            oxide: { formula: 'Al₂O₃', color: '#bae6fd', desc: 'Al₂O₃ · 透明絕緣阻障層' },
+            nitride: { formula: 'AlN', color: '#93c5fd', desc: 'AlN · 高導熱壓電薄膜' },
+            oxynitride: { formula: 'AlOₓNᵧ', color: '#a5f3fc', desc: 'AlOₓNᵧ · 透明氧氮化鋁' }
+          }
+        },
+        Cu: {
+          name: 'Cu (銅)',
+          conductive: true,
+          baseYield: 2.1,
+          metalColor: '#d97706',
+          atomColor: '#fb923c',
+          emissionRGB: [80, 235, 195],
+          emissionPeakNm: 521,
+          note: '高濺鍍率金屬靶 · 綠色特徵發光',
+          films: {
+            metal: { formula: 'Cu', color: '#ea580c', desc: 'Cu · 低阻值紅銅導線層' },
+            oxide: { formula: 'CuOₓ', color: '#7c2d12', desc: 'CuOₓ · 深褐半導體氧化銅' },
+            nitride: { formula: 'Cu₃N', color: '#9a3412', desc: 'Cu₃N · 暗紅棕色氮化銅' },
+            oxynitride: { formula: 'CuOₓNᵧ', color: '#78350f', desc: 'CuOₓNᵧ · 氧氮化銅薄膜' }
+          }
+        },
+        Si: {
+          name: 'Si (矽)',
+          conductive: true,
+          baseYield: 0.50,
+          metalColor: '#475569',
+          atomColor: '#94a3b8',
+          emissionRGB: [150, 175, 255],
+          emissionPeakNm: 390,
+          note: '摻雜導電矽靶 · 半導體/介電沉積',
+          films: {
+            metal: { formula: 'a-Si', color: '#475569', desc: 'a-Si · 深灰藍非晶矽膜' },
+            oxide: { formula: 'SiO₂', color: '#e0f2fe', desc: 'SiO₂ · 低折射率透明介電膜' },
+            nitride: { formula: 'Si₃N₄', color: '#60a5fa', desc: 'Si₃N₄ · 藍紫色鈍化阻障膜' },
+            oxynitride: { formula: 'SiOₓNᵧ', color: '#93c5fd', desc: 'SiOₓNᵧ · 可調折射率光學膜' }
+          }
+        },
+        Cr: {
+          name: 'Cr (鉻)',
+          conductive: true,
+          baseYield: 1.15,
+          metalColor: '#64748b',
+          atomColor: '#cbd5e1',
+          emissionRGB: [140, 220, 255],
+          emissionPeakNm: 425,
+          note: '導電金屬靶 · 優異附著力',
+          films: {
+            metal: { formula: 'Cr', color: '#94a3b8', desc: 'Cr · 亮灰金屬阻障/附著層' },
+            oxide: { formula: 'Cr₂O₃', color: '#15803d', desc: 'Cr₂O₃ · 深綠色抗腐蝕氧化鉻' },
+            nitride: { formula: 'CrN', color: '#64748b', desc: 'CrN · 銀灰色硬質保護膜' },
+            oxynitride: { formula: 'CrOₓNᵧ', color: '#334155', desc: 'CrOₓNᵧ · 黑灰色光學吸收膜' }
+          }
+        },
+        ITO: {
+          name: 'ITO (氧化銦錫)',
+          conductive: true,
+          baseYield: 0.90,
+          metalColor: '#334155',
+          atomColor: '#67e8f9',
+          emissionRGB: [110, 210, 255],
+          emissionPeakNm: 451,
+          note: '陶瓷導電靶 · 需微量 O₂ 調控氧空缺',
+          films: {
+            metal: { formula: 'ITO', color: '#67e8f9', desc: 'ITO · 透明導電膜 (低氧)' },
+            oxide: { formula: 'ITO (O-rich)', color: '#a5f3fc', desc: 'ITO · 高透光透明導電膜' },
+            nitride: { formula: 'ITO:N', color: '#38bdf8', desc: 'ITO:N · 氮摻雜透明導電膜' },
+            oxynitride: { formula: 'ITO:ON', color: '#7dd3fc', desc: 'ITO · 氧氮調控透明導電膜' }
+          }
+        },
+        Au: {
+          name: 'Au (金)',
+          conductive: true,
+          baseYield: 2.40,
+          metalColor: '#f59e0b',
+          atomColor: '#fcd34d',
+          emissionRGB: [250, 200, 110],
+          emissionPeakNm: 583,
+          note: '極高濺鍍率貴金屬 · 化學惰性',
+          films: {
+            metal: { formula: 'Au', color: '#fbbf24', desc: 'Au · 高導電黃金電極層' },
+            oxide: { formula: 'Au (O₂)', color: '#f59e0b', desc: 'Au · 金不易氧化，仍為金屬金膜' },
+            nitride: { formula: 'Au (N₂)', color: '#fbbf24', desc: 'Au · 惰性金屬金膜' },
+            oxynitride: { formula: 'Au', color: '#fbbf24', desc: 'Au · 高導電黃金電極層' }
+          }
+        },
+        SiO2: {
+          name: 'SiO₂ (絕緣靶)',
+          conductive: false,
+          baseYield: 0.32,
+          metalColor: '#bfdbfe',
+          atomColor: '#e0f2fe',
+          emissionRGB: [170, 220, 255],
+          emissionPeakNm: 390,
+          note: '絕緣陶瓷靶 · 必須使用 RF 放電',
+          films: {
+            metal: { formula: 'SiO₂', color: '#e0f2fe', desc: 'SiO₂ · 高品質石英介電薄膜' },
+            oxide: { formula: 'SiO₂', color: '#f0f9ff', desc: 'SiO₂ · 補氧高緻密介電薄膜' },
+            nitride: { formula: 'SiOₓNᵧ', color: '#bae6fd', desc: 'SiOₓNᵧ · 氮化修飾介電膜' },
+            oxynitride: { formula: 'SiOₓNᵧ', color: '#bae6fd', desc: 'SiOₓNᵧ · 氧氮化矽光學膜' }
+          }
+        }
+      };
+
+      const PROCESSES = {
+        DC: {
+          name: 'DC Magnetron',
+          short: 'DC',
+          note: '直流磁控 · 高沉積率，適用導電靶',
+          rateMult: 1.0,
+          voltageBase: 360,
+          densityMult: 1.0,
+          pulseHz: 0
+        },
+        RF: {
+          name: 'RF (13.56 MHz)',
+          short: 'RF 13.56MHz',
+          note: '射頻磁控 · 可濺鍍絕緣靶，防止荷電',
+          rateMult: 0.52,
+          voltageBase: 260,
+          densityMult: 0.78,
+          pulseHz: 0
+        },
+        PulsedDC: {
+          name: 'Pulsed DC',
+          short: 'Pulsed DC',
+          note: '脈衝直流 · 抑制反應濺鍍微電弧 (Arcing)',
+          rateMult: 0.88,
+          voltageBase: 390,
+          densityMult: 1.15,
+          pulseHz: 6
+        },
+        HiPIMS: {
+          name: 'HiPIMS',
+          short: 'HiPIMS',
+          note: '高功率脈衝 · 極高電漿離化率與緻密薄膜',
+          rateMult: 0.58,
+          voltageBase: 620,
+          densityMult: 3.2,
+          pulseHz: 2.5
+        }
+      };
+
+      const PRESETS = [
+        { id: 'tin', label: 'TiN 硬質膜', sub: 'DC · Ar/N₂', ar: 40, o2: 0, n2: 8, power: 350, process: 'DC', target: 'Ti' },
+        { id: 'tio2', label: 'TiO₂ 光學膜', sub: 'Pulsed · Ar/O₂', ar: 35, o2: 12, n2: 0, power: 400, process: 'PulsedDC', target: 'Ti' },
+        { id: 'cu', label: 'Cu 金屬導線', sub: 'DC · Pure Ar', ar: 45, o2: 0, n2: 0, power: 300, process: 'DC', target: 'Cu' },
+        { id: 'sio2', label: 'SiO₂ 介電層', sub: 'RF · 絕緣靶', ar: 30, o2: 5, n2: 0, power: 250, process: 'RF', target: 'SiO2' },
+        { id: 'aln', label: 'AlN 壓電膜', sub: 'HiPIMS · Ar/N₂', ar: 30, o2: 0, n2: 14, power: 500, process: 'HiPIMS', target: 'Al' },
+        { id: 'ito', label: 'ITO 透明導電', sub: 'DC · Ar/微O₂', ar: 40, o2: 1.5, n2: 0, power: 220, process: 'DC', target: 'ITO' }
+      ];
+
+      const STAGES = [
+        {
+          id: 0,
+          short: '0. 待機真空',
+          title: '階段 0：基礎真空待機 (Base Vacuum)',
+          desc: '腔體已由渦輪分子幫浦抽至高真空 (~10⁻⁶ Torr)，尚未通入製程氣體與施加功率。點擊「點火激發電漿」開始製程。',
+          duration: 0.6
+        },
+        {
+          id: 1,
+          short: '1. 通入氣體',
+          title: '階段 1：通入氣體與壓力穩定 (Gas Stabilization)',
+          desc: '質量流量控制器 (MFC) 依設定比例注入 Ar 與反應氣體 (O₂/N₂)，腔體壓力上升至數 mTorr 並達動態平衡。',
+          duration: 1.3
+        },
+        {
+          id: 2,
+          short: '2. 偏壓雪崩',
+          title: '階段 2：施加高壓與電子雪崩 (Townsend Avalanche)',
+          desc: '靶材陰極施加負偏壓，空間中自由電子受電場加速並被磁控磁場 (E×B) 束縛呈螺旋運動，撞擊 Ar 原子引發連鎖游離 (e⁻ + Ar → Ar⁺ + 2e⁻)。',
+          duration: 1.5
+        },
+        {
+          id: 3,
+          short: '3. 電漿點火',
+          title: '階段 3：帕申擊穿與輝光放電 (Plasma Breakdown)',
+          desc: '達到擊穿臨界條件！腔體閃現明亮輝光，靶材表面形成陰極暗區 (Cathode Sheath)，電漿顏色隨氣體比例與靶材發光光譜穩定呈現。',
+          duration: 1.2
+        },
+        {
+          id: 4,
+          short: '4. 離子轟擊',
+          title: '階段 4：Ar⁺ 離子加速轟擊靶材 (Ion Bombardment)',
+          desc: '帶正電的 Ar⁺ 離子在陰極鞘層強電場下高速撞擊靶材表面，產生級聯碰撞並將靶材中性原子濺射擊出，同時釋放二次電子維持電漿。',
+          duration: 1.3
+        },
+        {
+          id: 5,
+          short: '5. 穩定沉積',
+          title: '階段 5：薄膜成核與穩定沉積 (Steady Deposition)',
+          desc: '濺射出的靶材原子穿越電漿（若通入 O₂/N₂ 則產生表面或氣相反應），抵達基板表面凝結並持續長成均勻薄膜。',
+          duration: Infinity
+        }
+      ];
+
+      // =========================================================
+      // 2. Application State
+      // =========================================================
+      const state = {
+        ar: 40,
+        o2: 0,
+        n2: 8,
+        power: 350,
+        process: 'DC',
+        target: 'Ti',
+        stage: 0,          // 0..5
+        stageElapsed: 0,
+        autoSequence: true,
+        paused: false,
+        ignitionBlocked: false,
+        blockReason: '',
+        filmThickness: 0,  // nm
+        erosionDepth: 0,   // 0..1 visual
+        showBField: true,
+        showLabels: true,
+        showParticles: true,
+        time: 0,
+        breakdownFlash: 0,
+        activePreset: 'tin'
+      };
+
+      // Derived physics snapshot
+      let metrics = {};
+
+      // =========================================================
+      // 3. Physics Calculation Engine
+      // =========================================================
+      function computeMetrics() {
+        const tgt = TARGETS[state.target];
+        const proc = PROCESSES[state.process];
+        const totalFlow = state.ar + state.o2 + state.n2;
+
+        // Working pressure (mTorr): ~0.16 mTorr per sccm + base
+        const pressure = totalFlow > 0 ? +(0.35 + totalFlow * 0.145).toFixed(2) : 0.001;
+
+        // Reactive gas ratio
+        const reactiveFlow = state.o2 + state.n2;
+        const reactiveRatio = totalFlow > 0 ? reactiveFlow / totalFlow : 0;
+        const o2Ratio = totalFlow > 0 ? state.o2 / totalFlow : 0;
+        const n2Ratio = totalFlow > 0 ? state.n2 / totalFlow : 0;
+
+        // Determine regime & poisoning factor
+        let regime = '金屬模式';
+        let regimeClass = 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40';
+        let poisonRateFactor = 1.0;
+
+        if (!tgt.conductive) {
+          regime = '介電模式';
+          regimeClass = 'bg-sky-500/15 text-sky-300 border-sky-500/40';
+        } else if (reactiveFlow <= 0.1 || state.target === 'Au') {
+          regime = '金屬模式';
+          regimeClass = 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40';
+        } else if (reactiveRatio < 0.12) {
+          regime = '過渡區 (Transition)';
+          regimeClass = 'bg-amber-500/15 text-amber-300 border-amber-500/40';
+          poisonRateFactor = 1.0 - (reactiveRatio / 0.12) * 0.28;
+        } else {
+          regime = '化合物/毒化模式';
+          regimeClass = 'bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/40';
+          // O2 poisons target more strongly than N2
+          const poisonStrength = (o2Ratio * 1.35 + n2Ratio * 0.85);
+          poisonRateFactor = Math.max(0.24, 0.72 - poisonStrength * 0.55);
+        }
+
+        // Check ignition interlock / feasibility
+        let blocked = false;
+        let blockReason = '';
+        let warningMsg = '';
+
+        if (state.power < 15) {
+          blocked = true;
+          blockReason = '功率過低 (< 15 W)，無法達到電漿游離門檻，請提高 Power。';
+        } else if (totalFlow < 3) {
+          blocked = true;
+          blockReason = '總氣體流量過低 (< 3 sccm)，腔體壓力不足以觸發帕申擊穿 (Paschen Breakdown)，請提高 Ar 流量。';
+        } else if (!tgt.conductive && state.process !== 'RF') {
+          blocked = true;
+          blockReason = 'SiO₂ 為絕緣靶材，在 ' + proc.short + ' 模式下表面會累積正電荷導致無法持續放電，請切換 Process 至 RF (13.56 MHz)。';
+        } else if (state.ar < 2 && reactiveFlow >= 3) {
+          warningMsg = '未通入 Ar 惰性工作氣體，僅靠反應氣體放電效率極低且靶材嚴重毒化，建議加入 Ar。';
+        } else if (state.process === 'DC' && o2Ratio > 0.18 && tgt.conductive && state.target !== 'ITO' && state.target !== 'Au') {
+          warningMsg = '高氧氣比例下使用 DC 模式容易於靶材表面累積絕緣氧化層並引發微電弧 (Arcing)，建議改用 Pulsed DC 或 RF。';
+        }
+
+        state.ignitionBlocked = blocked;
+        state.blockReason = blockReason;
+
+        // If blocked while in plasma stages, drop back to stage 2 (stalled)
+        const plasmaActive = !blocked && state.stage >= 3;
+
+        // Target Voltage (V) & Current (A)
+        const pressureFactor = Math.max(0.75, Math.min(1.35, 1.25 - pressure * 0.025));
+        const powerVoltScale = Math.pow(Math.max(10, state.power) / 300, 0.22);
+        const voltage = (!blocked && state.stage >= 2)
+          ? Math.round(proc.voltageBase * pressureFactor * powerVoltScale * (1 + o2Ratio * 0.18))
+          : 0;
+
+        const current = (plasmaActive && voltage > 0)
+          ? +(state.power / voltage).toFixed(2)
+          : 0;
+
+        // Plasma Density (10^10 cm^-3)
+        const plasmaDensity = plasmaActive
+          ? +((state.power / 120) * proc.densityMult * (0.6 + Math.min(1.2, pressure / 8))).toFixed(2)
+          : (state.stage === 2 && !blocked ? 0.15 : 0);
+
+        // Deposition Rate (nm/min)
+        // Pressure scattering reduces rate at very high pressure
+        const scatterFactor = 1 / (1 + Math.max(0, pressure - 5) * 0.045);
+        const arContrib = totalFlow > 0 ? (0.35 + 0.65 * (state.ar / totalFlow)) : 0;
+        const depRate = (plasmaActive && state.stage >= 4)
+          ? +( (state.power / 100) * 14.5 * tgt.baseYield * proc.rateMult * poisonRateFactor * scatterFactor * arContrib ).toFixed(1)
+          : 0;
+
+        // Film stoichiometry selection
+        let filmInfo = tgt.films.metal;
+        if (state.o2 > 0.4 && state.n2 > 0.4) {
+          filmInfo = tgt.films.oxynitride;
+        } else if (state.o2 > 0.4) {
+          filmInfo = tgt.films.oxide;
+        } else if (state.n2 > 0.4) {
+          filmInfo = tgt.films.nitride;
+        }
+
+        // Dynamic Plasma Color Mixing (RGB)
+        const arW = totalFlow > 0 ? state.ar / totalFlow : 1;
+        const o2W = totalFlow > 0 ? state.o2 / totalFlow : 0;
+        const n2W = totalFlow > 0 ? state.n2 / totalFlow : 0;
+
+        // Base emission colors:
+        // Ar: Violet-Blue (145, 115, 255)
+        // O2: Pale Cyan-White (125, 220, 255)
+        // N2: Pink-Magenta (245, 115, 195)
+        const metalTintWeight = state.stage >= 4 ? (0.16 * poisonRateFactor) : 0;
+        const gasWeight = 1 - metalTintWeight;
+
+        const r = Math.round(gasWeight * (arW * 145 + o2W * 120 + n2W * 248) + metalTintWeight * tgt.emissionRGB[0]);
+        const g = Math.round(gasWeight * (arW * 112 + o2W * 222 + n2W * 110) + metalTintWeight * tgt.emissionRGB[1]);
+        const b = Math.round(gasWeight * (arW * 255 + o2W * 255 + n2W * 195) + metalTintWeight * tgt.emissionRGB[2]);
+
+        let colorName = '紫藍輝光 (Ar 主導)';
+        if (n2W > 0.22 && o2W > 0.22) colorName = '粉藍混合輝光 (Ar/O₂/N₂)';
+        else if (n2W > 0.16) colorName = '粉紫輝光 (N₂ 反應)';
+        else if (o2W > 0.16) colorName = '冰藍白輝光 (O₂ 反應)';
+        else if (state.target === 'Cu' && state.stage >= 4) colorName = '藍綠輝光 (Ar + Cu*)';
+        else if (state.target === 'Au' && state.stage >= 4) colorName = '暖紫輝光 (Ar + Au*)';
+
+        metrics = {
+          totalFlow,
+          pressure,
+          reactiveRatio,
+          o2Ratio,
+          n2Ratio,
+          regime,
+          regimeClass,
+          blocked,
+          blockReason,
+          warningMsg,
+          plasmaActive,
+          voltage,
+          current,
+          plasmaDensity,
+          depRate,
+          filmInfo,
+          plasmaRGB: [r, g, b],
+          colorName,
+          poisonRateFactor,
+          arcRisk: (state.process === 'DC' && o2Ratio > 0.18 && tgt.conductive && state.target !== 'ITO' && state.target !== 'Au')
+        };
+      }
+
+      // =========================================================
+      // 4. Particle System for Chamber Simulation
+      // =========================================================
+      const particles = {
+        gas: [],       // Ar, O2, N2 neutral molecules
+        electrons: [], // e- trapped near magnetron racetrack
+        ions: [],      // Ar+ bombarding target
+        sputtered: [], // Target atoms flying down to substrate
+        sparks: []     // Impact flashes & breakdown streamers
+      };
+
+      function initParticles() {
+        particles.gas = [];
+        particles.electrons = [];
+        particles.ions = [];
+        particles.sputtered = [];
+        particles.sparks = [];
+
+        for (let i = 0; i < 65; i++) {
+          particles.gas.push(spawnGasParticle(true));
+        }
+        for (let i = 0; i < 36; i++) {
+          particles.electrons.push(spawnElectron());
+        }
+      }
+
+      function pickGasSpecies() {
+        const tot = Math.max(0.1, state.ar + state.o2 + state.n2);
+        const r = Math.random() * tot;
+        if (r < state.ar) return 'Ar';
+        if (r < state.ar + state.o2) return 'O2';
+        return 'N2';
+      }
+
+      function spawnGasParticle(randomPos) {
+        return {
+          x: randomPos ? (0.14 + Math.random() * 0.72) : 0.12,
+          y: randomPos ? (0.28 + Math.random() * 0.54) : (0.42 + (Math.random() - 0.5) * 0.1),
+          vx: (Math.random() - 0.35) * 0.09,
+          vy: (Math.random() - 0.5) * 0.08,
+          species: pickGasSpecies(),
+          size: 2.3 + Math.random() * 1.1
+        };
+      }
+
+      function spawnElectron() {
+        const lobe = Math.random() < 0.5 ? -1 : 1; // Left or right racetrack lobe
+        return {
+          lobe,
+          angle: Math.random() * Math.PI,
+          speed: 2.4 + Math.random() * 2.8,
+          radiusScale: 0.55 + Math.random() * 0.55,
+          phase: Math.random() * Math.PI * 2
+        };
+      }
+
+      function spawnIon() {
+        // Ions originate in plasma region and accelerate UP to target racetrack
+        const lobeCenter = Math.random() < 0.5 ? 0.39 : 0.61;
+        return {
+          x: lobeCenter + (Math.random() - 0.5) * 0.14,
+          y: 0.36 + Math.random() * 0.16,
+          vy: -0.18 - Math.random() * 0.18,
+          vx: (Math.random() - 0.5) * 0.02
+        };
+      }
+
+      function spawnSputteredAtom(xNorm) {
+        const angle = (Math.random() - 0.5) * 1.15; // Cosine-like downward spread
+        const speed = 0.22 + Math.random() * 0.18;
+        const willReact = (state.o2 + state.n2) > 0.5 && state.target !== 'Au' && Math.random() < Math.min(0.88, metrics.reactiveRatio * 2.8);
+        return {
+          x: xNorm,
+          y: 0.255,
+          vx: Math.sin(angle) * speed * 0.45,
+          vy: Math.cos(angle) * speed,
+          reacted: false,
+          willReact,
+          reactY: 0.50 + Math.random() * 0.28
+        };
+      }
+
+      // =========================================================
+      // 5. Canvas Rendering (Chamber + OES)
+      // =========================================================
+      const chamberCanvas = document.getElementById('chamberCanvas');
+      const chamberCtx = chamberCanvas.getContext('2d');
+      const oesCanvas = document.getElementById('oesCanvas');
+      const oesCtx = oesCanvas.getContext('2d');
+
+      function resizeCanvases() {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+        const cRect = chamberCanvas.parentElement.getBoundingClientRect();
+        chamberCanvas.width = Math.max(300, Math.floor(cRect.width * dpr));
+        chamberCanvas.height = Math.max(260, Math.floor(cRect.height * dpr));
+        chamberCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        const oRect = oesCanvas.parentElement.getBoundingClientRect();
+        oesCanvas.width = Math.max(200, Math.floor(oRect.width * dpr));
+        oesCanvas.height = Math.max(100, Math.floor(oRect.height * dpr));
+        oesCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      function drawChamber(dt) {
+        const w = chamberCanvas.clientWidth;
+        const h = chamberCanvas.clientHeight;
+        const ctx = chamberCtx;
+        ctx.clearRect(0, 0, w, h);
+
+        // Background radial dark gradient
+        const bgGrad = ctx.createRadialGradient(w * 0.5, h * 0.45, 20, w * 0.5, h * 0.5, w * 0.7);
+        bgGrad.addColorStop(0, '#0d1426');
+        bgGrad.addColorStop(1, '#04070e');
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, w, h);
+
+        // Chamber coordinates
+        const chL = w * 0.11;
+        const chR = w * 0.89;
+        const chT = h * 0.08;
+        const chB = h * 0.92;
+        const chW = chR - chL;
+        const chH = chB - chT;
+
+        // Side Ports (Left Gas Inlet, Right TMP Exhaust)
+        ctx.fillStyle = '#1e293b';
+        ctx.strokeStyle = '#334155';
+        ctx.lineWidth = 1.5;
+        // Left Gas Inlet Pipe
+        ctx.fillRect(0, h * 0.42, chL + 4, h * 0.08);
+        ctx.strokeRect(-1, h * 0.42, chL + 5, h * 0.08);
+        // Right Vacuum Exhaust Port
+        ctx.fillRect(chR - 4, h * 0.62, w - chR + 5, h * 0.14);
+        ctx.strokeRect(chR - 4, h * 0.62, w - chR + 6, h * 0.14);
+
+        // Chamber inner wall frame
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(chL, chT, chW, chH, 16);
+        ctx.fillStyle = '#070c18';
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#334155';
+        ctx.stroke();
+        ctx.clip();
+
+        // Subtle engineering grid inside chamber
+        ctx.strokeStyle = 'rgba(51, 65, 85, 0.16)';
+        ctx.lineWidth = 1;
+        for (let gx = chL + 30; gx < chR; gx += 36) {
+          ctx.beginPath();
+          ctx.moveTo(gx, chT);
+          ctx.lineTo(gx, chB);
+          ctx.stroke();
+        }
+        for (let gy = chT + 30; gy < chB; gy += 36) {
+          ctx.beginPath();
+          ctx.moveTo(chL, gy);
+          ctx.lineTo(chR, gy);
+          ctx.stroke();
+        }
+
+        // Target & Magnetron geometry
+        const tgtW = chW * 0.56;
+        const tgtX = w * 0.5 - tgtW / 2;
+        const tgtY = chT + chH * 0.17;
+        const tgtH = chH * 0.055;
+        const targetBottomY = tgtY + tgtH;
+
+        // Substrate geometry
+        const subW = chW * 0.58;
+        const subX = w * 0.5 - subW / 2;
+        const subY = chB - chH * 0.13;
+        const subH = chH * 0.04;
+
+        // ---------------------------------------------------------
+        // Plasma Glow Rendering (Stage 2 flicker, Stage 3-5 stable)
+        // ---------------------------------------------------------
+        const [pr, pg, pb] = metrics.plasmaRGB;
+        const powerNorm = Math.min(1, state.power / 600);
+        const proc = PROCESSES[state.process];
+
+        // Pulse modulation for Pulsed DC / HiPIMS
+        let pulseMod = 1.0;
+        if (proc.pulseHz > 0 && state.stage >= 3) {
+          const wave = Math.sin(state.time * proc.pulseHz * Math.PI * 2);
+          pulseMod = state.process === 'HiPIMS'
+            ? (wave > 0.35 ? 1.38 : 0.62)
+            : (0.86 + 0.18 * wave);
+        }
+
+        let glowAlpha = 0;
+        if (!metrics.blocked) {
+          if (state.stage === 2) {
+            // Faint unstable Townsend avalanche flicker near racetrack
+            glowAlpha = (0.10 + 0.14 * Math.abs(Math.sin(state.time * 18))) * (0.4 + 0.6 * powerNorm);
+          } else if (state.stage >= 3) {
+            glowAlpha = (0.38 + 0.42 * powerNorm) * pulseMod;
+          }
+        }
+
+        if (glowAlpha > 0.01) {
+          // Cathode dark space gap below target
+          const sheathGap = Math.max(8, 22 - metrics.pressure * 0.7);
+          const plasmaTopY = targetBottomY + sheathGap;
+
+          // Bulk plasma glow
+          const bulkGrad = ctx.createRadialGradient(
+            w * 0.5, plasmaTopY + (subY - plasmaTopY) * 0.34, 15,
+            w * 0.5, plasmaTopY + (subY - plasmaTopY) * 0.45, chW * 0.56
+          );
+          bulkGrad.addColorStop(0, `rgba(${pr}, ${pg}, ${pb}, ${Math.min(0.68, glowAlpha * 0.72)})`);
+          bulkGrad.addColorStop(0.55, `rgba(${pr}, ${pg}, ${pb}, ${Math.min(0.32, glowAlpha * 0.32)})`);
+          bulkGrad.addColorStop(1, `rgba(${pr}, ${pg}, ${pb}, 0)`);
+          ctx.fillStyle = bulkGrad;
+          ctx.fillRect(chL, targetBottomY, chW, subY - targetBottomY);
+
+          // Intense Magnetron Racetrack Plasma Lobes (Left & Right)
+          const lobeOffsets = [-tgtW * 0.24, tgtW * 0.24];
+          lobeOffsets.forEach(dx => {
+            const lx = w * 0.5 + dx;
+            const ly = plasmaTopY + 18;
+            const lobeGrad = ctx.createRadialGradient(lx, ly, 4, lx, ly, tgtW * 0.26);
+            lobeGrad.addColorStop(0, `rgba(255, 255, 255, ${Math.min(0.85, glowAlpha * 0.85)})`);
+            lobeGrad.addColorStop(0.28, `rgba(${pr}, ${pg}, ${pb}, ${Math.min(0.9, glowAlpha * 0.92)})`);
+            lobeGrad.addColorStop(1, `rgba(${pr}, ${pg}, ${pb}, 0)`);
+            ctx.fillStyle = lobeGrad;
+            ctx.beginPath();
+            ctx.ellipse(lx, ly, tgtW * 0.25, chH * 0.14, 0, 0, Math.PI * 2);
+            ctx.fill();
+          });
+
+          // Breakdown initial bright flash (Stage 3 entry)
+          if (state.breakdownFlash > 0.01) {
+            ctx.fillStyle = `rgba(255, 255, 255, ${state.breakdownFlash * 0.45})`;
+            ctx.fillRect(chL, chT, chW, chH);
+          }
+
+          // Cathode Dark Space subtle band indicator
+          if (state.stage >= 3) {
+            ctx.fillStyle = 'rgba(4, 7, 15, 0.52)';
+            ctx.fillRect(tgtX, targetBottomY, tgtW, sheathGap * 0.72);
+          }
+        }
+
+        // ---------------------------------------------------------
+        // Magnetic Field Lines (B-Field arches under target)
+        // ---------------------------------------------------------
+        if (state.showBField) {
+          ctx.save();
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.32)';
+          ctx.lineWidth = 1.25;
+          ctx.setLineDash([4, 4]);
+          const centerX = w * 0.5;
+          const leftPole = tgtX + tgtW * 0.12;
+          const rightPole = tgtX + tgtW * 0.88;
+
+          [0.09, 0.14, 0.19].forEach(depthFrac => {
+            const archH = chH * depthFrac;
+            // Left arch (N -> S)
+            ctx.beginPath();
+            ctx.moveTo(leftPole, targetBottomY);
+            ctx.quadraticCurveTo((leftPole + centerX) * 0.5, targetBottomY + archH, centerX, targetBottomY);
+            ctx.stroke();
+            // Right arch (S -> N)
+            ctx.beginPath();
+            ctx.moveTo(centerX, targetBottomY);
+            ctx.quadraticCurveTo((rightPole + centerX) * 0.5, targetBottomY + archH, rightPole, targetBottomY);
+            ctx.stroke();
+          });
+          ctx.restore();
+        }
+
+        // ---------------------------------------------------------
+        // Magnetron Cathode Head & Target Plate
+        // ---------------------------------------------------------
+        // Cathode housing
+        ctx.fillStyle = '#1e293b';
+        ctx.strokeStyle = '#475569';
+        ctx.lineWidth = 1.5;
+        ctx.fillRect(tgtX - 8, chT, tgtW + 16, tgtY - chT);
+        ctx.strokeRect(tgtX - 8, chT, tgtW + 16, tgtY - chT);
+
+        // Magnets (N - S - N) inside housing
+        const magH = (tgtY - chT) * 0.44;
+        const magY = tgtY - magH - 4;
+        const magW = tgtW * 0.14;
+        const magnets = [
+          { x: tgtX + tgtW * 0.05, label: 'N', color: '#ef4444' },
+          { x: w * 0.5 - magW * 0.5, label: 'S', color: '#3b82f6' },
+          { x: tgtX + tgtW * 0.95 - magW, label: 'N', color: '#ef4444' }
+        ];
+        magnets.forEach(m => {
+          ctx.fillStyle = m.color;
+          ctx.globalAlpha = 0.78;
+          ctx.fillRect(m.x, magY, magW, magH);
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 10px Inter, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(m.label, m.x + magW * 0.5, magY + magH * 0.5);
+        });
+
+        // Target Plate with subtle racetrack erosion curve
+        const tgtInfo = TARGETS[state.target];
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(tgtX, tgtY);
+        ctx.lineTo(tgtX + tgtW, tgtY);
+        ctx.lineTo(tgtX + tgtW, targetBottomY);
+        // Bottom surface with two slight erosion grooves
+        const grooveDepth = state.erosionDepth * 4.5;
+        ctx.bezierCurveTo(
+          tgtX + tgtW * 0.82, targetBottomY,
+          tgtX + tgtW * 0.78, targetBottomY - grooveDepth,
+          tgtX + tgtW * 0.72, targetBottomY - grooveDepth
+        );
+        ctx.bezierCurveTo(
+          tgtX + tgtW * 0.64, targetBottomY - grooveDepth,
+          tgtX + tgtW * 0.56, targetBottomY,
+          w * 0.5, targetBottomY
+        );
+        ctx.bezierCurveTo(
+          tgtX + tgtW * 0.44, targetBottomY,
+          tgtX + tgtW * 0.36, targetBottomY - grooveDepth,
+          tgtX + tgtW * 0.28, targetBottomY - grooveDepth
+        );
+        ctx.bezierCurveTo(
+          tgtX + tgtW * 0.22, targetBottomY - grooveDepth,
+          tgtX + tgtW * 0.18, targetBottomY,
+          tgtX, targetBottomY
+        );
+        ctx.closePath();
+        ctx.fillStyle = tgtInfo.metalColor;
+        ctx.fill();
+        ctx.strokeStyle = '#94a3b8';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.restore();
+
+        // ---------------------------------------------------------
+        // Substrate Holder, Wafer, and Growing Thin Film
+        // ---------------------------------------------------------
+        // Pedestal / Chuck
+        ctx.fillStyle = '#1e293b';
+        ctx.strokeStyle = '#475569';
+        ctx.fillRect(subX - 10, subY + subH, subW + 20, chB - (subY + subH));
+        ctx.strokeRect(subX - 10, subY + subH, subW + 20, chB - (subY + subH));
+
+        // Wafer / Substrate
+        ctx.fillStyle = '#334155';
+        ctx.fillRect(subX, subY, subW, subH);
+        ctx.strokeStyle = '#64748b';
+        ctx.strokeRect(subX, subY, subW, subH);
+
+        // Growing Thin Film Layer on top of substrate
+        if (state.filmThickness > 0.05) {
+          const maxVisualFilmH = 18;
+          const filmH = Math.min(maxVisualFilmH, 1.5 + Math.log1p(state.filmThickness) * 2.9);
+          const filmGrad = ctx.createLinearGradient(subX, subY - filmH, subX + subW, subY);
+          filmGrad.addColorStop(0, metrics.filmInfo.color);
+          filmGrad.addColorStop(0.5, '#ffffff');
+          filmGrad.addColorStop(1, metrics.filmInfo.color);
+
+          ctx.save();
+          ctx.fillStyle = metrics.filmInfo.color;
+          ctx.fillRect(subX + 2, subY - filmH, subW - 4, filmH);
+          // Subtle metallic/optical sheen
+          ctx.globalAlpha = 0.25;
+          ctx.fillStyle = filmGrad;
+          ctx.fillRect(subX + 2, subY - filmH, subW - 4, filmH * 0.45);
+          ctx.restore();
+        }
+
+        // ---------------------------------------------------------
+        // Particles Animation
+        // ---------------------------------------------------------
+        if (state.showParticles) {
+          // 1. Neutral Gas Molecules (Stage >= 1)
+          if (state.stage >= 1 && metrics.totalFlow > 0) {
+            const visibleGas = Math.min(particles.gas.length, Math.max(8, Math.round(metrics.totalFlow * 0.55)));
+            for (let i = 0; i < visibleGas; i++) {
+              const p = particles.gas[i];
+              const px = p.x * w;
+              const py = p.y * h;
+              if (p.species === 'Ar') {
+                ctx.fillStyle = 'rgba(167, 139, 250, 0.55)';
+                ctx.beginPath();
+                ctx.arc(px, py, p.size, 0, Math.PI * 2);
+                ctx.fill();
+              } else if (p.species === 'O2') {
+                ctx.fillStyle = 'rgba(56, 189, 248, 0.72)';
+                ctx.beginPath();
+                ctx.arc(px - 1.5, py, p.size * 0.75, 0, Math.PI * 2);
+                ctx.arc(px + 1.5, py, p.size * 0.75, 0, Math.PI * 2);
+                ctx.fill();
+              } else {
+                ctx.fillStyle = 'rgba(244, 114, 182, 0.72)';
+                ctx.beginPath();
+                ctx.arc(px - 1.5, py, p.size * 0.75, 0, Math.PI * 2);
+                ctx.arc(px + 1.5, py, p.size * 0.75, 0, Math.PI * 2);
+                ctx.fill();
+              }
+            }
+          }
+
+          // 2. Magnetically Trapped Electrons e- (Stage >= 2 and not blocked)
+          if (!metrics.blocked && state.stage >= 2) {
+            const eCount = state.stage === 2
+              ? Math.min(particles.electrons.length, 14 + Math.floor(state.stageElapsed * 14))
+              : particles.electrons.length;
+
+            ctx.fillStyle = '#fde047';
+            for (let i = 0; i < eCount; i++) {
+              const e = particles.electrons[i];
+              const lobeCenter = w * 0.5 + e.lobe * tgtW * 0.24;
+              const rx = tgtW * 0.19 * e.radiusScale;
+              const ry = chH * 0.085 * e.radiusScale;
+              const ex = lobeCenter + Math.cos(e.angle) * rx;
+              const ey = targetBottomY + 12 + Math.abs(Math.sin(e.angle)) * ry + Math.sin(e.phase) * 3;
+              ctx.beginPath();
+              ctx.arc(ex, ey, 1.8, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+
+          // 3. Ar+ Ions Accelerating Upward to Target (Stage >= 4)
+          if (!metrics.blocked && state.stage >= 4) {
+            particles.ions.forEach(ion => {
+              const ix = ion.x * w;
+              const iy = ion.y * h;
+              // Ion tail
+              ctx.strokeStyle = 'rgba(196, 181, 253, 0.55)';
+              ctx.lineWidth = 1.6;
+              ctx.beginPath();
+              ctx.moveTo(ix, iy);
+              ctx.lineTo(ix, iy + 9);
+              ctx.stroke();
+
+              ctx.fillStyle = '#c4b5fd';
+              ctx.beginPath();
+              ctx.arc(ix, iy, 2.8, 0, Math.PI * 2);
+              ctx.fill();
+            });
+          }
+
+          // 4. Sputtered Target Atoms traveling to Substrate (Stage >= 4)
+          if (!metrics.blocked && state.stage >= 4) {
+            particles.sputtered.forEach(at => {
+              const ax = at.x * w;
+              const ay = at.y * h;
+              ctx.fillStyle = at.reacted ? metrics.filmInfo.color : tgtInfo.atomColor;
+              ctx.beginPath();
+              ctx.arc(ax, ay, at.reacted ? 3.0 : 2.4, 0, Math.PI * 2);
+              ctx.fill();
+              if (at.reacted) {
+                ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+                ctx.lineWidth = 0.8;
+                ctx.stroke();
+              }
+            });
+          }
+
+          // 5. Sparks (Ion impacts, Stage 2 Townsend streamers, or DC Arcing)
+          particles.sparks.forEach(sp => {
+            if (sp.type === 'arc') {
+              ctx.save();
+              ctx.strokeStyle = `rgba(255, 250, 210, ${sp.life})`;
+              ctx.lineWidth = 2;
+              ctx.beginPath();
+              ctx.moveTo(sp.x * w, sp.y * h);
+              ctx.lineTo((sp.x + (Math.random() - 0.5) * 0.04) * w, (sp.y + 0.05) * h);
+              ctx.lineTo((sp.x + (Math.random() - 0.5) * 0.06) * w, (sp.y + 0.11) * h);
+              ctx.stroke();
+              ctx.restore();
+            } else {
+              ctx.fillStyle = `rgba(254, 240, 138, ${sp.life})`;
+              ctx.beginPath();
+              ctx.arc(sp.x * w, sp.y * h, 4.5 * sp.life, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          });
+        }
+
+        // ---------------------------------------------------------
+        // Chamber Component Labels
+        // ---------------------------------------------------------
+        if (state.showLabels) {
+          ctx.font = '500 11px Inter, sans-serif';
+          ctx.textBaseline = 'middle';
+
+          // Target label
+          ctx.fillStyle = '#e2e8f0';
+          ctx.textAlign = 'center';
+          ctx.fillText(`Target: ${tgtInfo.name} (${proc.short})`, w * 0.5, chT + 12);
+
+          // Cathode Sheath label when plasma active
+          if (metrics.plasmaActive) {
+            ctx.fillStyle = 'rgba(226, 232, 240, 0.78)';
+            ctx.textAlign = 'right';
+            ctx.fillText('陰極暗區 (Sheath)', tgtX - 10, targetBottomY + 10);
+            ctx.fillStyle = `rgba(${pr}, ${pg}, ${pb}, 0.95)`;
+            ctx.fillText('磁控電漿輝光區', tgtX - 10, targetBottomY + 42);
+          }
+
+          // Gas inlet label
+          ctx.textAlign = 'left';
+          ctx.fillStyle = '#94a3b8';
+          ctx.fillText(`進氣口 (${metrics.totalFlow.toFixed(1)} sccm)`, chL + 10, h * 0.46);
+
+          // Pump label
+          ctx.textAlign = 'right';
+          ctx.fillText('TMP 抽氣口 →', chR - 10, h * 0.69);
+
+          // Substrate & Film label
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#cbd5e1';
+          const filmLabel = state.filmThickness > 0.1
+            ? `基板 Substrate · ${metrics.filmInfo.formula} (${state.filmThickness.toFixed(1)} nm)`
+            : '基板 Substrate (待沉積)';
+          ctx.fillText(filmLabel, w * 0.5, subY + subH + 16);
+        }
+
+        ctx.restore();
+      }
+
+      function drawOES() {
+        const w = oesCanvas.clientWidth;
+        const h = oesCanvas.clientHeight;
+        const ctx = oesCtx;
+        ctx.clearRect(0, 0, w, h);
+
+        // Gridlines
+        ctx.strokeStyle = 'rgba(51, 65, 85, 0.25)';
+        ctx.lineWidth = 1;
+        for (let y = h * 0.25; y < h; y += h * 0.25) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(w, y);
+          ctx.stroke();
+        }
+
+        // Baseline noise
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+        ctx.lineWidth = 1.2;
+        const baseY = h - 14;
+        ctx.moveTo(0, baseY);
+        for (let x = 0; x <= w; x += 4) {
+          const jitter = metrics.plasmaActive ? (Math.random() * 2.5) : (Math.random() * 0.6);
+          ctx.lineTo(x, baseY - jitter);
+        }
+        ctx.stroke();
+
+        if (!metrics.plasmaActive) {
+          ctx.fillStyle = '#64748b';
+          ctx.font = '11px Inter, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('電漿未激發 — 無發光光譜訊號', w * 0.5, h * 0.5);
+          return;
+        }
+
+        // Characteristic spectral lines (nm mapped across 300..850 nm)
+        const mapX = (nm) => ((nm - 300) / 550) * (w - 16) + 8;
+        const pScale = Math.min(1, 0.35 + (state.power / 750) * 0.65);
+        const arRatio = metrics.totalFlow > 0 ? state.ar / metrics.totalFlow : 0;
+
+        const lines = [];
+        // Ar I lines
+        if (state.ar > 0) {
+          lines.push({ nm: 415, int: 0.45 * arRatio * pScale, color: '#818cf8', label: 'Ar' });
+          lines.push({ nm: 696, int: 0.62 * arRatio * pScale, color: '#a78bfa', label: '' });
+          lines.push({ nm: 750, int: 0.92 * arRatio * pScale, color: '#c084fc', label: 'Ar 750' });
+          lines.push({ nm: 811, int: 0.98 * arRatio * pScale, color: '#a855f7', label: 'Ar 811' });
+        }
+        // O* lines
+        if (state.o2 > 0) {
+          const oInt = Math.min(1, metrics.o2Ratio * 2.8) * pScale;
+          lines.push({ nm: 777, int: 0.88 * oInt, color: '#38bdf8', label: 'O* 777' });
+          lines.push({ nm: 844, int: 0.58 * oInt, color: '#7dd3fc', label: '' });
+        }
+        // N2* lines
+        if (state.n2 > 0) {
+          const nInt = Math.min(1, metrics.n2Ratio * 2.8) * pScale;
+          lines.push({ nm: 337, int: 0.84 * nInt, color: '#f472b6', label: 'N₂* 337' });
+          lines.push({ nm: 391, int: 0.72 * nInt, color: '#e879f9', label: 'N₂⁺' });
+          lines.push({ nm: 670, int: 0.45 * nInt, color: '#f472b6', label: '' });
+        }
+        // Target metal line (visible during sputtering stage >= 4)
+        if (state.stage >= 4) {
+          const tgt = TARGETS[state.target];
+          const mInt = Math.min(0.9, 0.78 * metrics.poisonRateFactor * pScale);
+          lines.push({
+            nm: tgt.emissionPeakNm,
+            int: mInt,
+            color: `rgb(${tgt.emissionRGB[0]},${tgt.emissionRGB[1]},${tgt.emissionRGB[2]})`,
+            label: `${state.target}*`
+          });
+        }
+
+        lines.forEach(line => {
+          const x = mapX(line.nm);
+          const peakH = Math.max(4, line.int * (h - 32) * (0.94 + Math.random() * 0.08));
+          const grad = ctx.createLinearGradient(x, baseY - peakH, x, baseY);
+          grad.addColorStop(0, line.color);
+          grad.addColorStop(1, 'rgba(15, 23, 42, 0.1)');
+
+          ctx.strokeStyle = grad;
+          ctx.lineWidth = 2.6;
+          ctx.beginPath();
+          ctx.moveTo(x, baseY);
+          ctx.lineTo(x, baseY - peakH);
+          ctx.stroke();
+
+          if (line.label && peakH > 14) {
+            ctx.fillStyle = line.color;
+            ctx.font = '600 9px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(line.label, x, baseY - peakH - 5);
+          }
+        });
+      }
+
+      // =========================================================
+      // 6. Simulation Tick & Physics Update
+      // =========================================================
+      function stepSimulation(dt) {
+        if (state.paused) return;
+        state.time += dt;
+
+        // Fade breakdown flash
+        if (state.breakdownFlash > 0) {
+          state.breakdownFlash = Math.max(0, state.breakdownFlash - dt * 1.9);
+        }
+
+        // Auto-progression through ignition stages
+        if (state.autoSequence && state.stage < 5) {
+          state.stageElapsed += dt;
+          const currentStageObj = STAGES[state.stage];
+
+          // Check if blocked at Stage 2 (cannot ignite)
+          if (state.stage === 2 && metrics.blocked) {
+            state.stageElapsed = Math.min(state.stageElapsed, currentStageObj.duration * 0.9);
+          } else if (state.stageElapsed >= currentStageObj.duration) {
+            state.stage += 1;
+            state.stageElapsed = 0;
+            if (state.stage === 3 && !metrics.blocked) {
+              state.breakdownFlash = 1.0;
+            }
+            computeMetrics();
+            renderUI();
+          }
+        }
+
+        // If blocked while in stage >= 3, automatically extinguish back to stage 2
+        if (metrics.blocked && state.stage >= 3) {
+          state.stage = 2;
+          state.stageElapsed = 0;
+          computeMetrics();
+          renderUI();
+        }
+
+        // Film growth & subtle target erosion during Stage 5 (and slow start in Stage 4)
+        if (!metrics.blocked && state.stage >= 4 && metrics.depRate > 0) {
+          // Accelerated visual time: 1 sim second = 3 process seconds for clear thickness feedback
+          const stageMult = state.stage === 5 ? 1.0 : 0.35;
+          const deltaNm = (metrics.depRate / 60) * dt * 3.0 * stageMult;
+          state.filmThickness += deltaNm;
+          state.erosionDepth = Math.min(1, state.erosionDepth + deltaNm * 0.0018);
+        }
+
+        // Update gas particles
+        const flowSpeed = 0.6 + (metrics.totalFlow / 60);
+        for (let i = 0; i < particles.gas.length; i++) {
+          const p = particles.gas[i];
+          p.x += p.vx * dt * flowSpeed;
+          p.y += p.vy * dt * flowSpeed;
+          // Gentle drift from left inlet toward right pump
+          p.x += 0.015 * dt * flowSpeed;
+          if (p.x > 0.87 || p.x < 0.12 || p.y < 0.25 || p.y > 0.82) {
+            particles.gas[i] = spawnGasParticle(false);
+          }
+        }
+
+        // Update electrons
+        for (let i = 0; i < particles.electrons.length; i++) {
+          const e = particles.electrons[i];
+          e.angle += e.speed * dt * (1 + state.power / 700);
+          e.phase += 10 * dt;
+        }
+
+        // Spawn & update ions (Stage >= 4)
+        if (!metrics.blocked && state.stage >= 4) {
+          const desiredIons = Math.min(34, Math.max(4, Math.round(state.power / 26)));
+          if (particles.ions.length < desiredIons && Math.random() < 0.65) {
+            particles.ions.push(spawnIon());
+          }
+        }
+        for (let i = particles.ions.length - 1; i >= 0; i--) {
+          const ion = particles.ions[i];
+          ion.vy -= 0.45 * dt; // Accelerate toward target sheath
+          ion.y += ion.vy * dt;
+          ion.x += ion.vx * dt;
+          if (ion.y <= 0.25) {
+            // Impact on target -> spark + sputtered atom!
+            particles.sparks.push({ x: ion.x, y: 0.25, life: 0.9, type: 'impact' });
+            const ejectChance = Math.min(1, 0.35 + TARGETS[state.target].baseYield * 0.4 * metrics.poisonRateFactor);
+            if (Math.random() < ejectChance && particles.sputtered.length < 75) {
+              particles.sputtered.push(spawnSputteredAtom(ion.x));
+            }
+            particles.ions.splice(i, 1);
+          }
+        }
+
+        // Update sputtered atoms
+        for (let i = particles.sputtered.length - 1; i >= 0; i--) {
+          const at = particles.sputtered[i];
+          at.x += at.vx * dt;
+          at.y += at.vy * dt;
+          if (at.willReact && !at.reacted && at.y >= at.reactY) {
+            at.reacted = true;
+          }
+          if (at.y >= 0.79 || at.x < 0.13 || at.x > 0.87) {
+            particles.sputtered.splice(i, 1);
+          }
+        }
+
+        // Stage 2 avalanche micro-sparks or DC arcing warning sparks
+        if (!metrics.blocked && state.stage === 2 && Math.random() < 0.25) {
+          const lx = Math.random() < 0.5 ? 0.39 : 0.61;
+          particles.sparks.push({ x: lx + (Math.random() - 0.5) * 0.08, y: 0.25, life: 0.85, type: 'arc' });
+        } else if (metrics.arcRisk && state.stage >= 3 && Math.random() < 0.08) {
+          const lx = 0.32 + Math.random() * 0.36;
+          particles.sparks.push({ x: lx, y: 0.25, life: 1.0, type: 'arc' });
+        }
+
+        // Update sparks
+        for (let i = particles.sparks.length - 1; i >= 0; i--) {
+          particles.sparks[i].life -= dt * 3.2;
+          if (particles.sparks[i].life <= 0) {
+            particles.sparks.splice(i, 1);
+          }
+        }
+      }
+
+      // =========================================================
+      // 7. UI Rendering & Bindings
+      // =========================================================
+      const el = {
+        btnIgnite: document.getElementById('btnIgnite'),
+        btnIgniteLabel: document.getElementById('btnIgniteLabel'),
+        btnReplay: document.getElementById('btnReplay'),
+        btnPause: document.getElementById('btnPause'),
+        btnPauseLabel: document.getElementById('btnPauseLabel'),
+        btnResetFilm: document.getElementById('btnResetFilm'),
+        statusDot: document.getElementById('statusDot'),
+        statusHeader: document.getElementById('statusHeader'),
+        regimeBadge: document.getElementById('regimeBadge'),
+        warningBanner: document.getElementById('warningBanner'),
+        warningText: document.getElementById('warningText'),
+        stageStepper: document.getElementById('stageStepper'),
+        stageProgressText: document.getElementById('stageProgressText'),
+        stageTitleDesc: document.getElementById('stageTitleDesc'),
+        stageBodyDesc: document.getElementById('stageBodyDesc'),
+        valPressure: document.getElementById('valPressure'),
+        valVoltage: document.getElementById('valVoltage'),
+        valCurrent: document.getElementById('valCurrent'),
+        valDepRate: document.getElementById('valDepRate'),
+        valThickness: document.getElementById('valThickness'),
+        valPlasmaDensity: document.getElementById('valPlasmaDensity'),
+        filmFormulaBadge: document.getElementById('filmFormulaBadge'),
+        colorDot: document.getElementById('colorDot'),
+        colorName: document.getElementById('colorName'),
+        legendTargetDot: document.getElementById('legendTargetDot'),
+        presetGrid: document.getElementById('presetGrid'),
+        selectProcess: document.getElementById('selectProcess'),
+        selectTarget: document.getElementById('selectTarget'),
+        rangePower: document.getElementById('rangePower'),
+        numPower: document.getElementById('numPower'),
+        rangeAr: document.getElementById('rangeAr'),
+        numAr: document.getElementById('numAr'),
+        rangeO2: document.getElementById('rangeO2'),
+        numO2: document.getElementById('numO2'),
+        rangeN2: document.getElementById('rangeN2'),
+        numN2: document.getElementById('numN2'),
+        gasRatioLabel: document.getElementById('gasRatioLabel'),
+        barAr: document.getElementById('barAr'),
+        barO2: document.getElementById('barO2'),
+        barN2: document.getElementById('barN2'),
+        infoTargetNote: document.getElementById('infoTargetNote'),
+        infoProcessNote: document.getElementById('infoProcessNote'),
+        infoFilmNote: document.getElementById('infoFilmNote'),
+        toggleBField: document.getElementById('toggleBField'),
+        toggleLabels: document.getElementById('toggleLabels'),
+        toggleParticles: document.getElementById('toggleParticles')
+      };
+
+      function buildStaticControls() {
+        // Build stage stepper buttons
+        el.stageStepper.innerHTML = STAGES.map(st => `
+          <button data-stage="${st.id}" class="stage-pill text-left px-2.5 py-1.5 rounded-xl border border-slate-800 bg-slate-900/80 text-[11px] font-medium text-slate-400 hover:border-slate-600 truncate">
+            ${st.short}
+          </button>
+        `).join('');
+
+        el.stageStepper.querySelectorAll('button[data-stage]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const targetStage = Number(btn.getAttribute('data-stage'));
+            state.stage = targetStage;
+            state.stageElapsed = 0;
+            state.autoSequence = targetStage > 0 && targetStage < 5;
+            if (targetStage === 3 && !metrics.blocked) state.breakdownFlash = 0.85;
+            computeMetrics();
+            renderUI();
+          });
+        });
+
+        // Build preset buttons
+        el.presetGrid.innerHTML = PRESETS.map(p => `
+          <button data-preset="${p.id}" class="preset-btn text-left px-2.5 py-2 rounded-xl border border-slate-800 bg-slate-900/80 hover:border-sky-500/50 hover:bg-slate-800/80 transition">
+            <div class="text-xs font-semibold text-slate-200 leading-tight">${p.label}</div>
+            <div class="text-[10px] text-slate-400 mt-0.5">${p.sub}</div>
+          </button>
+        `).join('');
+
+        el.presetGrid.querySelectorAll('button[data-preset]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const preset = PRESETS.find(x => x.id === btn.getAttribute('data-preset'));
+            if (!preset) return;
+            state.activePreset = preset.id;
+            state.ar = preset.ar;
+            state.o2 = preset.o2;
+            state.n2 = preset.n2;
+            state.power = preset.power;
+            state.process = preset.process;
+            state.target = preset.target;
+            state.filmThickness = 0;
+            state.erosionDepth = 0;
+            state.stage = 1;
+            state.stageElapsed = 0;
+            state.autoSequence = true;
+            state.paused = false;
+            syncInputsFromState();
+            computeMetrics();
+            renderUI();
+          });
+        });
+      }
+
+      function syncInputsFromState() {
+        el.selectProcess.value = state.process;
+        el.selectTarget.value = state.target;
+        el.rangePower.value = state.power;
+        el.numPower.value = state.power;
+        el.rangeAr.value = state.ar;
+        el.numAr.value = state.ar;
+        el.rangeO2.value = state.o2;
+        el.numO2.value = state.o2;
+        el.rangeN2.value = state.n2;
+        el.numN2.value = state.n2;
+      }
+
+      function renderUI() {
+        const stObj = STAGES[state.stage];
+        const tgt = TARGETS[state.target];
+        const proc = PROCESSES[state.process];
+
+        // Ignite / Extinguish button label & style
+        if (state.stage >= 1) {
+          el.btnIgniteLabel.textContent = '關閉電漿';
+          el.btnIgnite.className = 'inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-rose-500/90 hover:bg-rose-400 text-white transition shadow-lg shadow-rose-500/20';
+        } else {
+          el.btnIgniteLabel.textContent = '點火激發電漿';
+          el.btnIgnite.className = 'inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-sky-500 hover:bg-sky-400 text-slate-950 transition shadow-lg shadow-sky-500/20';
+        }
+
+        // Pause button
+        el.btnPauseLabel.textContent = state.paused ? '繼續' : '暫停';
+
+        // Status header & dot
+        if (metrics.blocked && state.stage >= 2) {
+          el.statusDot.className = 'w-2.5 h-2.5 rounded-full bg-rose-500';
+          el.statusHeader.textContent = '點火受阻 (無法維持電漿)';
+        } else if (state.stage === 0) {
+          el.statusDot.className = 'w-2.5 h-2.5 rounded-full bg-slate-500';
+          el.statusHeader.textContent = '待機中 (高真空)';
+        } else if (state.stage < 5) {
+          el.statusDot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse';
+          el.statusHeader.textContent = `電漿激發中：${stObj.short}`;
+        } else {
+          el.statusDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse';
+          el.statusHeader.textContent = '電漿穩定沉積中';
+        }
+
+        // Regime badge
+        el.regimeBadge.textContent = metrics.regime;
+        el.regimeBadge.className = `px-2 py-0.5 rounded-full text-[11px] font-medium border ${metrics.regimeClass}`;
+
+        // Warning / Interlock Banner
+        const alertMsg = (metrics.blocked && state.stage >= 1) ? metrics.blockReason : metrics.warningMsg;
+        if (alertMsg) {
+          el.warningBanner.classList.remove('hidden');
+          el.warningText.textContent = alertMsg;
+        } else {
+          el.warningBanner.classList.add('hidden');
+        }
+
+        // Stage stepper classes
+        el.stageStepper.querySelectorAll('button[data-stage]').forEach(btn => {
+          const sid = Number(btn.getAttribute('data-stage'));
+          btn.classList.remove('active', 'done', 'error');
+          if (sid === state.stage) {
+            btn.classList.add(metrics.blocked && sid === 2 ? 'error' : 'active');
+          } else if (sid < state.stage) {
+            btn.classList.add('done');
+          }
+        });
+
+        el.stageProgressText.textContent = `STAGE ${state.stage} / 5`;
+        el.stageTitleDesc.textContent = stObj.title;
+        el.stageBodyDesc.textContent = (metrics.blocked && state.stage === 2)
+          ? metrics.blockReason
+          : stObj.desc;
+
+        // Telemetry values
+        el.valPressure.textContent = state.stage >= 1 ? metrics.pressure.toFixed(2) : '0.00';
+        el.valVoltage.textContent = metrics.voltage;
+        el.valCurrent.textContent = metrics.current.toFixed(2);
+        el.valDepRate.textContent = metrics.depRate.toFixed(1);
+        el.valThickness.textContent = state.filmThickness.toFixed(1);
+        el.valPlasmaDensity.textContent = metrics.plasmaDensity.toFixed(2);
+
+        // Film & Color Swatch
+        el.filmFormulaBadge.textContent = metrics.filmInfo.formula;
+        const [pr, pg, pb] = metrics.plasmaRGB;
+        el.colorDot.style.backgroundColor = metrics.plasmaActive ? `rgb(${pr},${pg},${pb})` : '#334155';
+        el.colorName.textContent = metrics.plasmaActive ? metrics.colorName : '無輝光';
+        el.legendTargetDot.style.backgroundColor = tgt.atomColor;
+
+        // Gas Ratio Bar
+        const tot = metrics.totalFlow;
+        const pAr = tot > 0 ? Math.round((state.ar / tot) * 100) : 0;
+        const pO2 = tot > 0 ? Math.round((state.o2 / tot) * 100) : 0;
+        const pN2 = tot > 0 ? Math.max(0, 100 - pAr - pO2) : 0;
+        el.barAr.style.width = `${pAr}%`;
+        el.barO2.style.width = `${pO2}%`;
+        el.barN2.style.width = `${pN2}%`;
+
+        const parts = [];
+        if (state.ar > 0) parts.push(`Ar ${pAr}%`);
+        if (state.o2 > 0) parts.push(`O₂ ${pO2}%`);
+        if (state.n2 > 0) parts.push(`N₂ ${pN2}%`);
+        el.gasRatioLabel.textContent = parts.length ? parts.join(' · ') : '無氣體輸入';
+
+        // Info card
+        el.infoTargetNote.textContent = `${state.target} · ${tgt.note}`;
+        el.infoProcessNote.textContent = proc.note;
+        el.infoFilmNote.textContent = metrics.filmInfo.desc;
+
+        // Highlight active preset
+        el.presetGrid.querySelectorAll('button[data-preset]').forEach(btn => {
+          const isMatch = btn.getAttribute('data-preset') === state.activePreset;
+          btn.classList.toggle('border-sky-400', isMatch);
+          btn.classList.toggle('bg-sky-500/10', isMatch);
+        });
+      }
+
+      function bindNumericSlider(rangeEl, numEl, key, min, max) {
+        const update = (rawVal) => {
+          let v = parseFloat(rawVal);
+          if (Number.isNaN(v)) v = min;
+          v = Math.max(min, Math.min(max, v));
+          state[key] = v;
+          state.activePreset = '';
+          rangeEl.value = v;
+          numEl.value = v;
+          computeMetrics();
+          // If user fixes a blocked parameter while stuck at stage 2, resume auto sequence!
+          if (!metrics.blocked && state.stage === 2) {
+            state.autoSequence = true;
+          }
+          renderUI();
+        };
+        rangeEl.addEventListener('input', () => update(rangeEl.value));
+        numEl.addEventListener('input', () => update(numEl.value));
+      }
+
+      function attachEvents() {
+        bindNumericSlider(el.rangePower, el.numPower, 'power', 0, 1000);
+        bindNumericSlider(el.rangeAr, el.numAr, 'ar', 0, 100);
+        bindNumericSlider(el.rangeO2, el.numO2, 'o2', 0, 50);
+        bindNumericSlider(el.rangeN2, el.numN2, 'n2', 0, 50);
+
+        el.selectProcess.addEventListener('change', () => {
+          state.process = el.selectProcess.value;
+          state.activePreset = '';
+          computeMetrics();
+          if (!metrics.blocked && state.stage === 2) state.autoSequence = true;
+          renderUI();
+        });
+
+        el.selectTarget.addEventListener('change', () => {
+          state.target = el.selectTarget.value;
+          state.activePreset = '';
+          computeMetrics();
+          if (!metrics.blocked && state.stage === 2) state.autoSequence = true;
+          renderUI();
+        });
+
+        el.btnIgnite.addEventListener('click', () => {
+          if (state.stage >= 1) {
+            // Extinguish
+            state.stage = 0;
+            state.stageElapsed = 0;
+            state.autoSequence = false;
+            particles.ions = [];
+            particles.sputtered = [];
+          } else {
+            // Ignite from stage 1
+            state.stage = 1;
+            state.stageElapsed = 0;
+            state.autoSequence = true;
+            state.paused = false;
+          }
+          computeMetrics();
+          renderUI();
+        });
+
+        el.btnReplay.addEventListener('click', () => {
+          state.stage = 0;
+          state.stageElapsed = 0;
+          state.autoSequence = true;
+          state.paused = false;
+          particles.ions = [];
+          particles.sputtered = [];
+          computeMetrics();
+          renderUI();
+        });
+
+        el.btnPause.addEventListener('click', () => {
+          state.paused = !state.paused;
+          renderUI();
+        });
+
+        el.btnResetFilm.addEventListener('click', () => {
+          state.filmThickness = 0;
+          state.erosionDepth = 0;
+          renderUI();
+        });
+
+        el.toggleBField.addEventListener('change', () => { state.showBField = el.toggleBField.checked; });
+        el.toggleLabels.addEventListener('change', () => { state.showLabels = el.toggleLabels.checked; });
+        el.toggleParticles.addEventListener('change', () => { state.showParticles = el.toggleParticles.checked; });
+
+        window.addEventListener('resize', resizeCanvases);
+      }
+
+      // =========================================================
+      // 8. Main Animation Loop & Initialization
+      // =========================================================
+      let lastTs = 0;
+      let uiSyncTimer = 0;
+
+      function animate(ts) {
+        if (!lastTs) lastTs = ts;
+        const dt = Math.min(0.05, (ts - lastTs) / 1000);
+        lastTs = ts;
+
+        stepSimulation(dt);
+        drawChamber(dt);
+        drawOES();
+
+        // Update live thickness readout ~6 times/sec without thrashing DOM
+        uiSyncTimer += dt;
+        if (uiSyncTimer >= 0.16) {
+          uiSyncTimer = 0;
+          el.valThickness.textContent = state.filmThickness.toFixed(1);
+        }
+
+        requestAnimationFrame(animate);
+      }
+
+      window.addEventListener('load', () => {
+        if (window.lucide && typeof window.lucide.createIcons === 'function') {
+          window.lucide.createIcons();
+        }
+        buildStaticControls();
+        attachEvents();
+        initParticles();
+        syncInputsFromState();
+        resizeCanvases();
+
+        // Automatically start ignition sequence on load so user sees plasma excitation immediately
+        state.stage = 1;
+        state.stageElapsed = 0;
+        state.autoSequence = true;
+        computeMetrics();
+        renderUI();
+
+        requestAnimationFrame(animate);
+      });
+    })();
+  </script>
+</body>
+</html>
